@@ -64,6 +64,20 @@ async def get_article_details(article_url: str) -> dict:
     details.pop('DC.Source.URI', None)
     details.pop('viewport', None)
     details.pop('generator', None)
+    details.pop('citation_volume', None)
+    details.pop('citation_issue', None)
+    details.pop('stats_total_article_view', None)
+    details.pop('stats_total_article_download', None)
+    details.pop('stats_total_article_favorite', None)
+    details.pop('stats_updated_at', None)
+    details.pop('stats_trdizin_citation_count', None)
+    details.pop('DC.Source.Issue', None)
+    details.pop('DC.Source.Volume', None)
+    details.pop('citation_volume', None)
+    details.pop('citation_issue', None)
+    details.pop('DC.Source', None)
+    details.pop('citation_journal_title', None)
+    details.pop('DC.Creator.PersonalName', None)
 
 
     # PDF URL'sini 'citation_pdf_url' meta etiketinden al
