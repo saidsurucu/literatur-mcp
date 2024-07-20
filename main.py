@@ -68,14 +68,11 @@ async def get_article_details(article_url: str) -> dict:
         'citation_issue', 'stats_total_article_view', 'stats_total_article_download',
         'stats_total_article_favorite', 'stats_updated_at', 'stats_trdizin_citation_count',
         'DC.Source.Issue', 'DC.Source.Volume', 'citation_volume', 'citation_issue',
-        'DC.Source', 'citation_journal_title', 'DC.Creator.PersonalName'
+        'DC.Source', 'citation_journal_title', 'DC.Creator.PersonalName',
+        'citation_language', 'DC.Type', 'DC.Identifier.pageNumber', 'DC.Identifier.URI'
     ]:
         details.pop(key, None)
 
-    # PDF URL'sini 'citation_pdf_url' meta etiketinden al
-    pdf_url = details.get('citation_pdf_url')
-    if pdf_url:
-        details['pdf_url'] = pdf_url
 
     return {'details': details}
 
@@ -100,7 +97,7 @@ async def fetch_articles(page_url: str, host: str) -> List[dict]:
             'title': card.find('h5', class_='card-title').find('a').text.strip(),
             'url': card.find('h5', class_='card-title').find('a')['href'],
             'details': details.get('details', {}),
-            'readable_pdf': f"{host}/api/pdf-to-html?pdf_url={details.get('details', {}).get('pdf_url', '')}"
+            'readable_pdf': f"{host}/api/pdf-to-html?pdf_url={details.get('details', {}).get('citation_pdf_url', '')}"
         }
         for card, details in zip(article_cards, details_list)
         if card.find('h5', class_='card-title').find('a')
