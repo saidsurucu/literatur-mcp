@@ -180,6 +180,8 @@ async def pdf_to_html(pdf_url: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF dönüştürme hatası: {str(e)}")
 
-# Vercel için ASGI handler
-async def handler(scope, receive, send):
-    await app(scope, receive, send)
+# Vercel için WSGI uyumlu handler
+from fastapi.middleware.wsgi import WSGIMiddleware
+
+def handler(environ, start_response):
+    return WSGIMiddleware(app)(environ, start_response)
