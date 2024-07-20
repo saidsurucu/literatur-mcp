@@ -1,6 +1,8 @@
-from fastapi import FastAPI, HTTPException, Request
+from __future__ import annotations
+from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from typing import List, Optional
+from pydantic import BaseModel
+from typing import List, Optional, Literal
 import httpx
 from bs4 import BeautifulSoup
 import io
@@ -11,17 +13,44 @@ from cachetools import TTLCache
 from functools import lru_cache
 import html
 
+
 app = FastAPI()
 
-# 24 saat süreyle 1000 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
-cache = TTLCache(maxsize=1000, ttl=86400)
+# 1 saat süreyle 100 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
+cache = TTLCache(maxsize=100, ttl=3600)
+
+class SearchParams(BaseModel):
+    title: Optional[str] = None
+    running_title: Optional[str] = None
+    journal: Optional[str] = None
+    issn: Optional[str] = None
+    eissn: Optional[str] = None
+    abstract: Optional[str] = None
+    keywords: Optional[str] = None
+    doi: Optional[str] = None
+    doi_url: Optional[str] = None
+    doi_prefix: Optional[str] = None
+    author: Optional[str] = None
+    orcid: Optional[str] = None
+    institution: Optional[str] = None
+    translator: Optional[str] = None
+    pubyear: Optional[str] = None
+    citation: Optional[str] = None
+    pages: int = 1
+    sort_by: Optional[str] = None
+    article_type: Optional[
+        Literal[
+            "54", "56", "58", "55", "60", "65", "57", "1", "5",
+            "62", "73", "2", "10", "59", "66", "72",
+        ]
+    ] = None
 
 @lru_cache(maxsize=100)
 async def get_article_details(article_url: str) -> dict:
     async with httpx.AsyncClient() as client:
         response = await client.get(article_url)
     soup = BeautifulSoup(response.text, 'html.parser')
-    
+   
     details = {}
     meta_tags = soup.find_all('meta')
 
@@ -52,7 +81,7 @@ async def fetch_articles(page_url: str, host: str) -> List[dict]:
             tasks.append(asyncio.create_task(get_article_details(url)))
 
     details_list = await asyncio.gather(*tasks)
-    
+   
     return [
         {
             'title': card.find('h5', class_='card-title').find('a').text.strip(),
@@ -65,26 +94,19 @@ async def fetch_articles(page_url: str, host: str) -> List[dict]:
     ]
 
 @app.post("/api/search")
-async def search_articles(request: Request):
+async def search_articles(request: Request, search_params: SearchParams = Body(...)):
     base_url = "https://dergipark.org.tr/tr/search"
     query_params = []
 
-    form = await request.form()
-    search_params = {key: value for key, value in form.items()}
-
-    for field, value in search_params.items():
+    for field, value in search_params.dict(exclude_unset=True).items():
         if field not in ['pages', 'sort_by', 'article_type']:
             query_params.append(f"{field}:{value}")
 
     query_string = "+".join(query_params)
-    
-    pages = int(search_params.get('pages', 1))
-    sort_by = search_params.get('sort_by')
-    article_type = search_params.get('article_type')
-
+   
     # Önbellek anahtarı oluştur
-    cache_key = f"{query_string}_{pages}_{sort_by}_{article_type}"
-    
+    cache_key = f"{query_string}_{search_params.pages}_{search_params.sort_by}_{search_params.article_type}"
+   
     # Önbellekte varsa, önbellekten döndür
     if cache_key in cache:
         return {"articles": cache[cache_key]}
@@ -95,13 +117,13 @@ async def search_articles(request: Request):
     # Host adını al
     host = str(request.base_url).rstrip('/')
 
-    for page in range(1, pages + 1):
+    for page in range(1, search_params.pages + 1):
         page_url = f"{base_url}?q={query_string}&section=articles"
-        if article_type:
-            page_url += f"&aggs%5BarticleType.id%5D%5B0%5D={article_type}"
-        if sort_by:
-            page_url += f"&sortBy={sort_by}"
-        
+        if search_params.article_type:
+            page_url += f"&aggs%5BarticleType.id%5D%5B0%5D={search_params.article_type}"
+        if search_params.sort_by:
+            page_url += f"&sortBy={search_params.sort_by}"
+       
         tasks.append(asyncio.create_task(fetch_articles(page_url, host)))
 
     results = await asyncio.gather(*tasks)
@@ -124,13 +146,13 @@ async def pdf_to_html(pdf_url: str):
         async with httpx.AsyncClient() as client:
             response = await client.get(pdf_url)
             response.raise_for_status()
-        
+       
         # PDF içeriğini oku ve metne dönüştür
         pdf_content = io.BytesIO(response.content)
         output_string = io.StringIO()
         extract_text_to_fp(pdf_content, output_string, laparams=LAParams(), codec='utf-8')
         text = output_string.getvalue()
-        
+       
         # Metni basit HTML'e dönüştür
         html_content = f"""
         <!DOCTYPE html>
@@ -149,7 +171,7 @@ async def pdf_to_html(pdf_url: str):
         </body>
         </html>
         """
-        
+       
         # Sonucu önbelleğe al
         cache[pdf_url] = html_content
 
@@ -168,3 +190,4 @@ handler = Mangum(app)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+SearchParams.update_forward_refs()

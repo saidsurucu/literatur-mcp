@@ -1,8 +1,9 @@
 fastapi
 uvicorn
+pydantic
 httpx
 beautifulsoup4
 pdfminer.six
 cachetools
 mangum
-typing_extensions==4.4.0
+
