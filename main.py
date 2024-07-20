@@ -11,11 +11,13 @@ import asyncio
 from cachetools import TTLCache
 from functools import lru_cache
 import html
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
+app.mount("/gizlilik", StaticFiles(directory="gizlilik"), name="gizlilik")
 
 # 1 saat süreyle 100 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
-cache = TTLCache(maxsize=100, ttl=3600)
+cache = TTLCache(maxsize=1000, ttl=86400)
 
 class SearchParams(BaseModel):
     title: Optional[str] = None
