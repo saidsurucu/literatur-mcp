@@ -15,8 +15,6 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 app = FastAPI()
-# Mount the gizlilik directory
-app.mount("/gizlilik-static", StaticFiles(directory="gizlilik"), name="gizlilik-static")
 
 @app.get("/gizlilik", response_class=HTMLResponse)
 async def get_gizlilik():
