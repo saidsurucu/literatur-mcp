@@ -69,7 +69,8 @@ async def get_article_details(article_url: str) -> dict:
         'stats_total_article_favorite', 'stats_updated_at', 'stats_trdizin_citation_count',
         'DC.Source.Issue', 'DC.Source.Volume', 'citation_volume', 'citation_issue',
         'DC.Source', 'citation_journal_title', 'DC.Creator.PersonalName',
-        'citation_language', 'DC.Type', 'DC.Identifier.pageNumber', 'DC.Identifier.URI'
+        'citation_language', 'DC.Type', 'DC.Identifier.pageNumber', 'DC.Identifier.URI',
+        'citation_reference'
     ]:
         details.pop(key, None)
 
