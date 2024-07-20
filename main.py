@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, ForwardRef
 import httpx
 from bs4 import BeautifulSoup
 import io
@@ -16,6 +16,21 @@ app = FastAPI()
 
 # 1 saat süreyle 100 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
 cache = TTLCache(maxsize=100, ttl=3600)
+
+# Forward references
+ItemRef = ForwardRef('Item')
+
+class User(BaseModel):
+    id: int
+    name: str
+    bought_items: List[ItemRef]
+
+class Item(BaseModel):
+    id: int
+    price: float
+    name: str
+
+User.update_forward_refs()
 
 class SearchParams(BaseModel):
     title: Optional[str] = None
@@ -180,8 +195,11 @@ async def pdf_to_html(pdf_url: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF dönüştürme hatası: {str(e)}")
 
-# Vercel için WSGI uyumlu handler
-from fastapi.middleware.wsgi import WSGIMiddleware
+# Vercel için handler fonksiyonu
+async def handler(request, response):
+    return await app(request, response)
 
-def handler(environ, start_response):
-    return WSGIMiddleware(app)(environ, start_response)
+# Lokalde çalıştırmak için
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
