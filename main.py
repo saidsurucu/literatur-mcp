@@ -12,9 +12,17 @@ from cachetools import TTLCache
 from functools import lru_cache
 import html
 from fastapi.staticfiles import StaticFiles
+import os
 
 app = FastAPI()
-app.mount("/gizlilik", StaticFiles(directory="gizlilik"), name="gizlilik")
+# Mount the gizlilik directory
+app.mount("/gizlilik-static", StaticFiles(directory="gizlilik"), name="gizlilik-static")
+
+@app.get("/gizlilik", response_class=HTMLResponse)
+async def get_gizlilik():
+    file_path = os.path.join("gizlilik", "index.html")
+    with open(file_path, "r", encoding="utf-8") as file:
+        return HTMLResponse(content=file.read(), status_code=200)
 
 # 1 saat süreyle 100 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
 cache = TTLCache(maxsize=1000, ttl=86400)
