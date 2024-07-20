@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+httpx
+beautifulsoup4
+pdfminer.six
+cachetools
+mangum
