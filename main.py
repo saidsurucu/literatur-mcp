@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import List, Optional, Literal, ForwardRef
+from typing import List, Optional, Literal
 import httpx
 from bs4 import BeautifulSoup
 import io
@@ -16,21 +16,6 @@ app = FastAPI()
 
 # 1 saat süreyle 100 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
 cache = TTLCache(maxsize=100, ttl=3600)
-
-# Forward references
-ItemRef = ForwardRef('Item')
-
-class User(BaseModel):
-    id: int
-    name: str
-    bought_items: List[ItemRef]
-
-class Item(BaseModel):
-    id: int
-    price: float
-    name: str
-
-User.update_forward_refs()
 
 class SearchParams(BaseModel):
     title: Optional[str] = None
@@ -58,12 +43,13 @@ class SearchParams(BaseModel):
         ]
     ] = None
 
+
 @lru_cache(maxsize=100)
 async def get_article_details(article_url: str) -> dict:
     async with httpx.AsyncClient() as client:
         response = await client.get(article_url)
     soup = BeautifulSoup(response.text, 'html.parser')
-    
+   
     details = {}
     meta_tags = soup.find_all('meta')
 
@@ -94,7 +80,7 @@ async def fetch_articles(page_url: str, host: str) -> List[dict]:
             tasks.append(asyncio.create_task(get_article_details(url)))
 
     details_list = await asyncio.gather(*tasks)
-    
+   
     return [
         {
             'title': card.find('h5', class_='card-title').find('a').text.strip(),
@@ -116,10 +102,10 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
             query_params.append(f"{field}:{value}")
 
     query_string = "+".join(query_params)
-    
+   
     # Önbellek anahtarı oluştur
     cache_key = f"{query_string}_{search_params.pages}_{search_params.sort_by}_{search_params.article_type}"
-    
+   
     # Önbellekte varsa, önbellekten döndür
     if cache_key in cache:
         return {"articles": cache[cache_key]}
@@ -136,7 +122,7 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
             page_url += f"&aggs%5BarticleType.id%5D%5B0%5D={search_params.article_type}"
         if search_params.sort_by:
             page_url += f"&sortBy={search_params.sort_by}"
-        
+       
         tasks.append(asyncio.create_task(fetch_articles(page_url, host)))
 
     results = await asyncio.gather(*tasks)
@@ -159,13 +145,13 @@ async def pdf_to_html(pdf_url: str):
         async with httpx.AsyncClient() as client:
             response = await client.get(pdf_url)
             response.raise_for_status()
-        
+       
         # PDF içeriğini oku ve metne dönüştür
         pdf_content = io.BytesIO(response.content)
         output_string = io.StringIO()
         extract_text_to_fp(pdf_content, output_string, laparams=LAParams(), codec='utf-8')
         text = output_string.getvalue()
-        
+       
         # Metni basit HTML'e dönüştür
         html_content = f"""
         <!DOCTYPE html>
@@ -184,7 +170,7 @@ async def pdf_to_html(pdf_url: str):
         </body>
         </html>
         """
-        
+       
         # Sonucu önbelleğe al
         cache[pdf_url] = html_content
 
@@ -195,11 +181,12 @@ async def pdf_to_html(pdf_url: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF dönüştürme hatası: {str(e)}")
 
-# Vercel için handler fonksiyonu
-async def handler(request, response):
-    return await app(request, response)
+# Vercel için gerekli yapılandırma
+from mangum import Mangum
+handler = Mangum(app)
 
 # Lokalde çalıştırmak için
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+SearchParams.model_rebuild()
