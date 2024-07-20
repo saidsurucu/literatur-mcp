@@ -57,6 +57,15 @@ async def get_article_details(article_url: str) -> dict:
         if tag.get('name') and tag.get('content'):
             details[tag.get('name')] = tag.get('content')
 
+    details.pop('Diplab.Event.ArticleView', None)
+    details.pop('citation_firstpage', None)
+    details.pop('citation_lastpage', None)
+    details.pop('DC.Language', None)
+    details.pop('DC.Source.URI', None)
+    details.pop('viewport', None)
+    details.pop('generator', None)
+
+
     # PDF URL'sini 'citation_pdf_url' meta etiketinden al
     pdf_url = details.get('citation_pdf_url')
     if pdf_url:
