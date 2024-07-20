@@ -70,7 +70,9 @@ async def get_article_details(article_url: str) -> dict:
         'DC.Source.Issue', 'DC.Source.Volume', 'citation_volume', 'citation_issue',
         'DC.Source', 'citation_journal_title', 'DC.Creator.PersonalName',
         'citation_language', 'DC.Type', 'DC.Identifier.pageNumber', 'DC.Identifier.URI',
-        'citation_reference'
+        'citation_reference', 'citation_journal_abbrev', 'citation_abstract_html_url',
+        'DC.Type.articleType', 'DC.Identifier', 'citation_funding_source',
+        'stats_trdizin_citation_updated_at', 'DC.Identifier.DOI'
     ]:
         details.pop(key, None)
 
