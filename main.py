@@ -9,7 +9,6 @@ from pdfminer.high_level import extract_text_to_fp
 from pdfminer.layout import LAParams
 import asyncio
 from cachetools import TTLCache
-from functools import lru_cache
 import html
 import os
 
@@ -21,8 +20,8 @@ async def get_gizlilik():
     with open(file_path, "r", encoding="utf-8") as file:
         return HTMLResponse(content=file.read(), status_code=200)
 
-# 1 gün süreyle 1000 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
-cache = TTLCache(maxsize=1000, ttl=86400)
+# Cache only for pdf-to-html
+pdf_cache = TTLCache(maxsize=1000, ttl=86400)
 
 class SearchParams(BaseModel):
     title: Optional[str] = None
@@ -50,7 +49,6 @@ class SearchParams(BaseModel):
         ]
     ] = None
 
-@lru_cache(maxsize=100)
 async def get_article_details(article_url: str) -> dict:
     async with httpx.AsyncClient() as client:
         response = await client.get(article_url)
@@ -81,9 +79,6 @@ async def get_article_details(article_url: str) -> dict:
 
     return {'details': details}
 
-async def fetch_article_details(url: str):
-    return await get_article_details(url)
-
 async def fetch_articles(page_url: str, host: str) -> List[dict]:
     async with httpx.AsyncClient() as client:
         response = await client.get(page_url)
@@ -96,7 +91,7 @@ async def fetch_articles(page_url: str, host: str) -> List[dict]:
         title_tag = card.find('h5', class_='card-title').find('a')
         if title_tag:
             url = title_tag['href']
-            tasks.append(fetch_article_details(url))
+            tasks.append(get_article_details(url))
 
     details_list = await asyncio.gather(*tasks)
    
@@ -122,13 +117,6 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
 
     query_string = "+".join(query_params)
    
-    # Önbellek anahtarı oluştur
-    cache_key = f"{query_string}_{search_params.pages}_{search_params.sort_by}_{search_params.article_type}"
-   
-    # Önbellekte varsa, önbellekten döndür
-    if cache_key in cache:
-        return {"articles": cache[cache_key]}
-
     all_articles = []
     tasks = []
 
@@ -148,16 +136,13 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     for articles in results:
         all_articles.extend(articles)
 
-    # Sonuçları önbelleğe al
-    cache[cache_key] = all_articles
-
     return {"articles": all_articles}
 
 @app.get("/api/pdf-to-html", response_class=HTMLResponse)
 async def pdf_to_html(pdf_url: str):
     # Önbellekte varsa, önbellekten döndür
-    if pdf_url in cache:
-        return HTMLResponse(content=cache[pdf_url], status_code=200)
+    if pdf_url in pdf_cache:
+        return HTMLResponse(content=pdf_cache[pdf_url], status_code=200)
 
     try:
         # PDF'yi indir
@@ -191,7 +176,7 @@ async def pdf_to_html(pdf_url: str):
         """
        
         # Sonucu önbelleğe al
-        cache[pdf_url] = html_content
+        pdf_cache[pdf_url] = html_content
 
         return HTMLResponse(content=html_content, status_code=200)
 
