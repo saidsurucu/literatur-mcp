@@ -43,7 +43,6 @@ class SearchParams(BaseModel):
         ]
     ] = None
 
-
 @lru_cache(maxsize=100)
 async def get_article_details(article_url: str) -> dict:
     async with httpx.AsyncClient() as client:
@@ -189,4 +188,3 @@ handler = Mangum(app)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-SearchParams.model_rebuild()
