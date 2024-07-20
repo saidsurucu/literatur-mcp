@@ -49,6 +49,12 @@ class SearchParams(BaseModel):
         ]
     ] = None
 
+def truncate_text(text: str, word_limit: int) -> str:
+    words = text.split()
+    if len(words) > word_limit:
+        return ' '.join(words[:word_limit]) + '...'
+    return text
+
 async def get_article_details(article_url: str) -> dict:
     async with httpx.AsyncClient() as client:
         response = await client.get(article_url)
@@ -76,6 +82,9 @@ async def get_article_details(article_url: str) -> dict:
     ]:
         details.pop(key, None)
 
+    # Truncate citation_abstract if it exists
+    if 'citation_abstract' in details:
+        details['citation_abstract'] = truncate_text(details['citation_abstract'], 150)
 
     return {'details': details}
 
