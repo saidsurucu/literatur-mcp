@@ -84,7 +84,7 @@ async def get_article_details(article_url: str) -> dict:
 
     # Truncate citation_abstract if it exists
     if 'citation_abstract' in details:
-        details['citation_abstract'] = truncate_text(details['citation_abstract'], 150)
+        details['citation_abstract'] = truncate_text(details['citation_abstract'], 100)
 
     return {'details': details}
 
