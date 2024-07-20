@@ -1,4 +1,3 @@
-from __future__ import annotations
 from fastapi import FastAPI, Body, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -12,7 +11,6 @@ import asyncio
 from cachetools import TTLCache
 from functools import lru_cache
 import html
-
 
 app = FastAPI()
 
@@ -44,6 +42,7 @@ class SearchParams(BaseModel):
             "62", "73", "2", "10", "59", "66", "72",
         ]
     ] = None
+
 
 @lru_cache(maxsize=100)
 async def get_article_details(article_url: str) -> dict:
@@ -190,4 +189,3 @@ handler = Mangum(app)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-SearchParams.update_forward_refs()
