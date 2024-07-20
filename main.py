@@ -180,12 +180,11 @@ async def pdf_to_html(pdf_url: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF dönüştürme hatası: {str(e)}")
 
-# Vercel için gerekli yapılandırma
-from mangum import Mangum
-handler = Mangum(app)
+# Vercel için handler fonksiyonu
+async def handler(request, response):
+    return await app(request, response)
 
 # Lokalde çalıştırmak için
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    
