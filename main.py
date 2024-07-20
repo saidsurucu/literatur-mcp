@@ -11,7 +11,6 @@ import asyncio
 from cachetools import TTLCache
 from functools import lru_cache
 import html
-from fastapi.staticfiles import StaticFiles
 import os
 
 app = FastAPI()
@@ -22,7 +21,7 @@ async def get_gizlilik():
     with open(file_path, "r", encoding="utf-8") as file:
         return HTMLResponse(content=file.read(), status_code=200)
 
-# 1 saat süreyle 100 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
+# 1 gün süreyle 1000 öğeyi önbelleğe alabilecek bir TTLCache oluşturun
 cache = TTLCache(maxsize=1000, ttl=86400)
 
 class SearchParams(BaseModel):
@@ -43,14 +42,13 @@ class SearchParams(BaseModel):
     pubyear: Optional[str] = None
     citation: Optional[str] = None
     pages: int = 1
-    sort_by: Optional[str] = None
+    sort_by: Optional[Literal["newest", "oldest"]] = None
     article_type: Optional[
         Literal[
             "54", "56", "58", "55", "60", "65", "57", "1", "5",
             "62", "73", "2", "10", "59", "66", "72",
         ]
     ] = None
-
 
 @lru_cache(maxsize=100)
 async def get_article_details(article_url: str) -> dict:
@@ -65,28 +63,16 @@ async def get_article_details(article_url: str) -> dict:
         if tag.get('name') and tag.get('content'):
             details[tag.get('name')] = tag.get('content')
 
-    details.pop('Diplab.Event.ArticleView', None)
-    details.pop('citation_firstpage', None)
-    details.pop('citation_lastpage', None)
-    details.pop('DC.Language', None)
-    details.pop('DC.Source.URI', None)
-    details.pop('viewport', None)
-    details.pop('generator', None)
-    details.pop('citation_volume', None)
-    details.pop('citation_issue', None)
-    details.pop('stats_total_article_view', None)
-    details.pop('stats_total_article_download', None)
-    details.pop('stats_total_article_favorite', None)
-    details.pop('stats_updated_at', None)
-    details.pop('stats_trdizin_citation_count', None)
-    details.pop('DC.Source.Issue', None)
-    details.pop('DC.Source.Volume', None)
-    details.pop('citation_volume', None)
-    details.pop('citation_issue', None)
-    details.pop('DC.Source', None)
-    details.pop('citation_journal_title', None)
-    details.pop('DC.Creator.PersonalName', None)
-
+    # Remove unwanted keys
+    for key in [
+        'Diplab.Event.ArticleView', 'citation_firstpage', 'citation_lastpage',
+        'DC.Language', 'DC.Source.URI', 'viewport', 'generator', 'citation_volume',
+        'citation_issue', 'stats_total_article_view', 'stats_total_article_download',
+        'stats_total_article_favorite', 'stats_updated_at', 'stats_trdizin_citation_count',
+        'DC.Source.Issue', 'DC.Source.Volume', 'citation_volume', 'citation_issue',
+        'DC.Source', 'citation_journal_title', 'DC.Creator.PersonalName'
+    ]:
+        details.pop(key, None)
 
     # PDF URL'sini 'citation_pdf_url' meta etiketinden al
     pdf_url = details.get('citation_pdf_url')
@@ -94,6 +80,9 @@ async def get_article_details(article_url: str) -> dict:
         details['pdf_url'] = pdf_url
 
     return {'details': details}
+
+async def fetch_article_details(url: str):
+    return await get_article_details(url)
 
 async def fetch_articles(page_url: str, host: str) -> List[dict]:
     async with httpx.AsyncClient() as client:
@@ -106,9 +95,8 @@ async def fetch_articles(page_url: str, host: str) -> List[dict]:
     for card in article_cards:
         title_tag = card.find('h5', class_='card-title').find('a')
         if title_tag:
-            title = title_tag.text.strip()
             url = title_tag['href']
-            tasks.append(asyncio.create_task(get_article_details(url)))
+            tasks.append(fetch_article_details(url))
 
     details_list = await asyncio.gather(*tasks)
    
@@ -154,7 +142,7 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
         if search_params.sort_by:
             page_url += f"&sortBy={search_params.sort_by}"
        
-        tasks.append(asyncio.create_task(fetch_articles(page_url, host)))
+        tasks.append(fetch_articles(page_url, host))
 
     results = await asyncio.gather(*tasks)
     for articles in results:
