@@ -14,11 +14,14 @@ import os
 
 app = FastAPI()
 
+# Singleton HTTP client
+http_client = httpx.AsyncClient()
+
 @app.get("/gizlilik", response_class=HTMLResponse)
 async def get_gizlilik():
     file_path = os.path.join("gizlilik", "index.html")
-    with open(file_path, "r", encoding="utf-8") as file:
-        return HTMLResponse(content=file.read(), status_code=200)
+    async with aiofiles.open(file_path, "r", encoding="utf-8") as file:
+        return HTMLResponse(content=await file.read(), status_code=200)
 
 # Cache only for pdf-to-html
 pdf_cache = TTLCache(maxsize=1000, ttl=86400)
@@ -56,8 +59,7 @@ def truncate_text(text: str, word_limit: int) -> str:
     return text
 
 async def get_article_details(article_url: str) -> dict:
-    async with httpx.AsyncClient() as client:
-        response = await client.get(article_url)
+    response = await http_client.get(article_url)
     soup = BeautifulSoup(response.text, 'html.parser')
    
     details = {}
@@ -89,8 +91,7 @@ async def get_article_details(article_url: str) -> dict:
     return {'details': details}
 
 async def fetch_articles(page_url: str, host: str) -> List[dict]:
-    async with httpx.AsyncClient() as client:
-        response = await client.get(page_url)
+    response = await http_client.get(page_url)
     soup = BeautifulSoup(response.text, 'html.parser')
 
     article_cards = soup.find_all('div', class_='card article-card dp-card-outline')
@@ -155,9 +156,8 @@ async def pdf_to_html(pdf_url: str):
 
     try:
         # PDF'yi indir
-        async with httpx.AsyncClient() as client:
-            response = await client.get(pdf_url)
-            response.raise_for_status()
+        response = await http_client.get(pdf_url)
+        response.raise_for_status()
        
         # PDF içeriğini oku ve metne dönüştür
         pdf_content = io.BytesIO(response.content)
