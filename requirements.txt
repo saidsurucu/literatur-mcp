@@ -6,4 +6,5 @@ beautifulsoup4
 pdfminer.six
 cachetools
 mangum
+aiofiles
 

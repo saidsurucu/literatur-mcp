@@ -11,6 +11,7 @@ import asyncio
 from cachetools import TTLCache
 import html
 import os
+import aiofiles
 
 app = FastAPI()
 
@@ -43,7 +44,7 @@ class SearchParams(BaseModel):
     translator: Optional[str] = None
     pubyear: Optional[str] = None
     citation: Optional[str] = None
-    pages: int = 1
+    page: int = 1
     sort_by: Optional[Literal["newest", "oldest"]] = None
     article_type: Optional[
         Literal[
@@ -122,31 +123,22 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     query_params = []
 
     for field, value in search_params.dict(exclude_unset=True).items():
-        if field not in ['pages', 'sort_by', 'article_type']:
+        if field not in ['page', 'sort_by', 'article_type']:
             query_params.append(f"{field}:{value}")
 
     query_string = "+".join(query_params)
    
-    all_articles = []
-    tasks = []
-
-    # Host adını al
+    # Construct URL for the requested page only
     host = str(request.base_url).rstrip('/')
+    page_url = f"{base_url}/{search_params.page}?q={query_string}&section=articles"
+    if search_params.article_type:
+        page_url += f"&aggs%5BarticleType.id%5D%5B0%5D={search_params.article_type}"
+    if search_params.sort_by:
+        page_url += f"&sortBy={search_params.sort_by}"
+   
+    articles = await fetch_articles(page_url, host)
 
-    for page in range(1, search_params.pages + 1):
-        page_url = f"{base_url}?q={query_string}&section=articles"
-        if search_params.article_type:
-            page_url += f"&aggs%5BarticleType.id%5D%5B0%5D={search_params.article_type}"
-        if search_params.sort_by:
-            page_url += f"&sortBy={search_params.sort_by}"
-       
-        tasks.append(fetch_articles(page_url, host))
-
-    results = await asyncio.gather(*tasks)
-    for articles in results:
-        all_articles.extend(articles)
-
-    return {"articles": all_articles}
+    return {"articles": articles}
 
 @app.get("/api/pdf-to-html", response_class=HTMLResponse)
 async def pdf_to_html(pdf_url: str):
