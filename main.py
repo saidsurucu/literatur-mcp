@@ -69,7 +69,9 @@ async def get_article_details(article_url: str) -> dict:
     for tag in meta_tags:
         if tag.get('name') and tag.get('content'):
             details[tag.get('name')] = tag.get('content')
-
+    
+    pdf_url = details.pop('citation_pdf_url', None)
+    
     # Remove unwanted keys
     for key in [
         'Diplab.Event.ArticleView', 'citation_firstpage', 'citation_lastpage',
@@ -89,7 +91,7 @@ async def get_article_details(article_url: str) -> dict:
     if 'citation_abstract' in details:
         details['citation_abstract'] = truncate_text(details['citation_abstract'], 100)
 
-    return {'details': details}
+    return {'details': details, 'pdf_url': pdf_url}
 
 async def fetch_articles(page_url: str, host: str) -> List[dict]:
     response = await http_client.get(page_url)
@@ -111,7 +113,7 @@ async def fetch_articles(page_url: str, host: str) -> List[dict]:
             'title': card.find('h5', class_='card-title').find('a').text.strip(),
             'url': card.find('h5', class_='card-title').find('a')['href'],
             'details': details.get('details', {}),
-            'readable_pdf': f"{host}/api/pdf-to-html?pdf_url={details.get('details', {}).get('citation_pdf_url', '')}"
+            'readable_pdf': f"{host}/api/pdf-to-html?pdf_url={details['pdf_url']}" if details['pdf_url'] else None
         }
         for card, details in zip(article_cards, details_list)
         if card.find('h5', class_='card-title').find('a')
@@ -168,9 +170,27 @@ async def pdf_to_html(pdf_url: str):
             <style>
                 body {{ font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; }}
                 p {{ margin-bottom: 15px; text-align: justify; }}
+                .pdf-button {{ margin-bottom: 20px; }}
+                .pdf-button button {{ 
+                    font-size: 18px; 
+                    padding: 10px 20px; 
+                    background-color: #007BFF; 
+                    color: white; 
+                    border: none; 
+                    border-radius: 5px; 
+                    cursor: pointer; 
+                }}
+                .pdf-button button:hover {{
+                    background-color: #0056b3;
+                }}
             </style>
         </head>
         <body>
+            <div class="pdf-button">
+                <a href="{pdf_url}" target="_blank">
+                    <button>Orijinal PDF'yi Görüntüle</button>
+                </a>
+            </div>
             <pre>{html.escape(text)}</pre>
         </body>
         </html>
