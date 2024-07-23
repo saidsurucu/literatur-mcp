@@ -15,8 +15,8 @@ import aiofiles
 
 app = FastAPI()
 
-# Singleton HTTP client with increased timeout
-http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+# Singleton HTTP client with optimized settings
+http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), limits=httpx.Limits(max_connections=100, max_keepalive_connections=20))
 
 @app.get("/gizlilik", response_class=HTMLResponse)
 async def get_gizlilik():
@@ -104,6 +104,7 @@ async def get_article_details(article_url: str) -> dict:
         details['citation_abstract'] = truncate_text(details['citation_abstract'], 100)
 
     # Get journal indices
+    indices = []
     if journal_url_base:
         journal_url = f"{journal_url_base}/indexes"
         print(f"Fetching journal indices from URL: {journal_url}")
@@ -116,10 +117,7 @@ async def get_article_details(article_url: str) -> dict:
             print(f"Found indices: {indices}")
         except httpx.HTTPError as e:
             print(f"Error fetching journal indices: {e}")
-            indices = []
-    else:
-        indices = []
-
+    
     return {'details': details, 'pdf_url': pdf_url, 'indices': ', '.join(indices)}
 
 async def fetch_articles(page_url: str, host: str, index_filter: str) -> List[dict]:
