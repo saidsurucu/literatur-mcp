@@ -52,6 +52,7 @@ class SearchParams(BaseModel):
             "62", "73", "2", "10", "59", "66", "72",
         ]
     ] = None
+    index_filter: Optional[Literal["tr_dizin_icerenler", "bos_olmayanlar", "hepsi"]] = "hepsi"
 
 def truncate_text(text: str, word_limit: int) -> str:
     words = text.split()
@@ -60,15 +61,20 @@ def truncate_text(text: str, word_limit: int) -> str:
     return text
 
 async def get_article_details(article_url: str) -> dict:
+    print(f"Fetching article details for URL: {article_url}")
     response = await http_client.get(article_url)
     soup = BeautifulSoup(response.text, 'html.parser')
    
     details = {}
     meta_tags = soup.find_all('meta')
 
+    journal_url_base = None
+
     for tag in meta_tags:
         if tag.get('name') and tag.get('content'):
             details[tag.get('name')] = tag.get('content')
+            if tag.get('name') == 'DC.Source.URI':
+                journal_url_base = tag.get('content')
     
     pdf_url = details.pop('citation_pdf_url', None)
     
@@ -83,7 +89,7 @@ async def get_article_details(article_url: str) -> dict:
         'citation_language', 'DC.Type', 'DC.Identifier.pageNumber', 'DC.Identifier.URI',
         'citation_reference', 'citation_journal_abbrev', 'citation_abstract_html_url',
         'DC.Type.articleType', 'DC.Identifier', 'citation_funding_source',
-        'stats_trdizin_citation_updated_at', 'DC.Identifier.DOI', 'DC.Title'
+        'stats_trdizin_citation_updated_at', 'DC.Identifier.DOI', 'DC.Title', 'stats_trdizin_url'
     ]:
         details.pop(key, None)
 
@@ -91,9 +97,22 @@ async def get_article_details(article_url: str) -> dict:
     if 'citation_abstract' in details:
         details['citation_abstract'] = truncate_text(details['citation_abstract'], 100)
 
-    return {'details': details, 'pdf_url': pdf_url}
+    # Get journal indices
+    if journal_url_base:
+        journal_url = f"{journal_url_base}/indexes"
+        print(f"Fetching journal indices from URL: {journal_url}")
+        index_response = await http_client.get(journal_url)
+        index_soup = BeautifulSoup(index_response.text, 'html.parser')
+        index_elements = index_soup.select('table.journal-index-listing h5.j-index-listing-index-title')
+        indices = [index.text.strip() for index in index_elements]
+        print(f"Found indices: {indices}")
+    else:
+        indices = []
 
-async def fetch_articles(page_url: str, host: str) -> List[dict]:
+    return {'details': details, 'pdf_url': pdf_url, 'indices': ', '.join(indices)}
+
+async def fetch_articles(page_url: str, host: str, index_filter: str) -> List[dict]:
+    print(f"Fetching articles from URL: {page_url}")
     response = await http_client.get(page_url)
     soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -108,16 +127,25 @@ async def fetch_articles(page_url: str, host: str) -> List[dict]:
 
     details_list = await asyncio.gather(*tasks)
    
-    return [
+    articles = [
         {
             'title': card.find('h5', class_='card-title').find('a').text.strip(),
             'url': card.find('h5', class_='card-title').find('a')['href'],
             'details': details.get('details', {}),
+            'indices': details.get('indices', ''),
             'readable_pdf': f"{host}/api/pdf-to-html?pdf_url={details['pdf_url']}" if details['pdf_url'] else None
         }
         for card, details in zip(article_cards, details_list)
         if card.find('h5', class_='card-title').find('a')
     ]
+
+    # Filter articles based on index_filter
+    if index_filter == "tr_dizin_icerenler":
+        articles = [article for article in articles if "TR Dizin" in article['indices']]
+    elif index_filter == "bos_olmayanlar":
+        articles = [article for article in articles if article['indices']]
+
+    return articles
 
 @app.post("/api/search")
 async def search_articles(request: Request, search_params: SearchParams = Body(...)):
@@ -125,7 +153,7 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     query_params = []
 
     for field, value in search_params.dict(exclude_unset=True).items():
-        if field not in ['page', 'sort_by', 'article_type']:
+        if field not in ['page', 'sort_by', 'article_type', 'index_filter']:
             query_params.append(f"{field}:{value}")
 
     query_string = "+".join(query_params)
@@ -138,7 +166,8 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     if search_params.sort_by:
         page_url += f"&sortBy={search_params.sort_by}"
    
-    articles = await fetch_articles(page_url, host)
+    print(f"Constructed page URL: {page_url}")
+    articles = await fetch_articles(page_url, host, search_params.index_filter)
 
     return {"articles": articles}
 
