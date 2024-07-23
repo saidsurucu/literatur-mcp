@@ -15,8 +15,8 @@ import aiofiles
 
 app = FastAPI()
 
-# Singleton HTTP client
-http_client = httpx.AsyncClient()
+# Singleton HTTP client with increased timeout
+http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
 
 @app.get("/gizlilik", response_class=HTMLResponse)
 async def get_gizlilik():
@@ -62,7 +62,13 @@ def truncate_text(text: str, word_limit: int) -> str:
 
 async def get_article_details(article_url: str) -> dict:
     print(f"Fetching article details for URL: {article_url}")
-    response = await http_client.get(article_url)
+    try:
+        response = await http_client.get(article_url)
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        print(f"Error fetching article details: {e}")
+        return {'details': {}, 'pdf_url': None, 'indices': ''}
+
     soup = BeautifulSoup(response.text, 'html.parser')
    
     details = {}
@@ -101,11 +107,16 @@ async def get_article_details(article_url: str) -> dict:
     if journal_url_base:
         journal_url = f"{journal_url_base}/indexes"
         print(f"Fetching journal indices from URL: {journal_url}")
-        index_response = await http_client.get(journal_url)
-        index_soup = BeautifulSoup(index_response.text, 'html.parser')
-        index_elements = index_soup.select('table.journal-index-listing h5.j-index-listing-index-title')
-        indices = [index.text.strip() for index in index_elements]
-        print(f"Found indices: {indices}")
+        try:
+            index_response = await http_client.get(journal_url)
+            index_response.raise_for_status()
+            index_soup = BeautifulSoup(index_response.text, 'html.parser')
+            index_elements = index_soup.select('table.journal-index-listing h5.j-index-listing-index-title')
+            indices = [index.text.strip() for index in index_elements]
+            print(f"Found indices: {indices}")
+        except httpx.HTTPError as e:
+            print(f"Error fetching journal indices: {e}")
+            indices = []
     else:
         indices = []
 
@@ -113,7 +124,13 @@ async def get_article_details(article_url: str) -> dict:
 
 async def fetch_articles(page_url: str, host: str, index_filter: str) -> List[dict]:
     print(f"Fetching articles from URL: {page_url}")
-    response = await http_client.get(page_url)
+    try:
+        response = await http_client.get(page_url)
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        print(f"Error fetching articles: {e}")
+        return []
+
     soup = BeautifulSoup(response.text, 'html.parser')
 
     article_cards = soup.find_all('div', class_='card article-card dp-card-outline')
