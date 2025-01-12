@@ -7,4 +7,5 @@ pdfminer.six
 cachetools
 mangum
 aiofiles
+markitdown
 
