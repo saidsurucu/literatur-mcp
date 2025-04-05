@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 gunicorn # Docker'da üretim sunucusu için
-playwright
+playwright==1.51.0
 beautifulsoup4
 cachetools
 aiofiles
