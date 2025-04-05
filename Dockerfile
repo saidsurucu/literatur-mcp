@@ -1,7 +1,7 @@
 # 1. Adım: Playwright'ın resmi Python imajını temel al
 # Belirli bir sürüm kullanmak (örneğin 1.44.0) tekrarlanabilirliği artırır
 # 'jammy' Ubuntu 22.04 tabanlıdır, güncel bir seçenektir
-FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.51.0-jammy
 
 # 2. Adım: Çalışma dizinini ayarla
 WORKDIR /app
