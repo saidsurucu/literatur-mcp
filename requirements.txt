@@ -1,10 +1,11 @@
 fastapi
 uvicorn
-pydantic
-httpx
+gunicorn # Docker'da üretim sunucusu için
+playwright
 beautifulsoup4
 cachetools
-mangum
 aiofiles
 markitdown
-
+httpx
+html5lib
+asyncio
