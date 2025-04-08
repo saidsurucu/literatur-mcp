@@ -1,11 +1,12 @@
-fastapi
-uvicorn
-gunicorn # Docker'da üretim sunucusu için
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+gunicorn>=20.0.0
 playwright==1.51.0
-beautifulsoup4
-cachetools
-aiofiles
-markitdown
-httpx
-html5lib
-asyncio
+httpx>=0.25.0
+beautifulsoup4>=4.11.0
+html5lib>=1.1
+aiofiles>=23.0.0
+cachetools>=5.0.0
+markitdown>=0.5.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
