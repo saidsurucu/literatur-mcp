@@ -66,4 +66,4 @@ EXPOSE 8000
 # --timeout 120: Bir worker'ın yanıt vermezse ne kadar süre sonra yeniden başlatılacağı (saniye).
 #                 Playwright işlemleri uzun sürebileceği için timeout değeri yüksek tutulabilir.
 # --log-level info: Loglama seviyesini ayarla (debug, warning, error vb. olabilir)
-CMD ["gunicorn", "-w", "2", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--log-level", "info"]
+CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--log-level", "info"]
