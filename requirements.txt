@@ -9,5 +9,4 @@ markitdown
 httpx
 html5lib
 asyncio
-anycaptcha
 redis
