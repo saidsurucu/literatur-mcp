@@ -61,8 +61,6 @@ app = FastAPI(
 if CAPSOLVER_API_KEY == "YOUR_CAPSOLVER_API_KEY_HERE" or not CAPSOLVER_API_KEY:
     print("\n" + "="*60 + "\nUYARI: CAPSOLVER_API_KEY ortam değişkeni ayarlanmamış...\n" + "="*60 + "\n")
 
-# --- HTTP Client ---
-pdf_http_client = httpx.AsyncClient( timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=True )
 
 # --- Pydantic Models ---
 class SearchParams(BaseModel):
@@ -634,25 +632,27 @@ async def pdf_to_html(pdf_url: str):
 
     tmp_name = None
     try:
-        # Download PDF
-        async with pdf_http_client as client:
-            response = await client.get(pdf_url, follow_redirects=True)
-            response.raise_for_status()
+        # --- FIX: Create a new client instance for each request ---
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=True) as client:
+            print(f"Downloading PDF from: {pdf_url}")
+            # Use the new 'client' instance directly
+            response = await client.get(pdf_url) # follow_redirects client seviyesinde ayarlandı, burada tekrar gerekmez
+            response.raise_for_status() # Raise errors for bad status codes
             content_type = response.headers.get('content-type', '').lower()
             if 'application/pdf' not in content_type:
                 print(f"Warning: URL content type ('{content_type}') is not 'application/pdf'.")
             pdf_content = response.content
+        # --- Client is automatically closed here by 'async with' ---
 
         if not pdf_content:
             raise HTTPException(status_code=404, detail="Downloaded PDF content is empty.")
 
-        # Write to temporary file
-        # Using await asyncio.to_thread for potentially blocking write
+        # Write to temporary file (using os.path for sync operations)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            # Use thread for potentially blocking disk I/O
             await asyncio.to_thread(tmp.write, pdf_content)
             tmp_name = tmp.name
 
-        # Use os.path.exists (synchronous check is usually fine here)
         if not tmp_name or not os.path.exists(tmp_name):
             raise FileNotFoundError("Temporary PDF file not found after write.")
 
@@ -660,7 +660,6 @@ async def pdf_to_html(pdf_url: str):
         print(f"Converting PDF {tmp_name} to Markdown...")
         md = MarkItDown()
         try:
-            # Run synchronous library in thread pool
             markdown_result = await asyncio.to_thread(md.convert, tmp_name)
             markdown_text = markdown_result.text_content if markdown_result else "Conversion failed or produced no text."
         except Exception as convert_err:
@@ -684,7 +683,6 @@ async def pdf_to_html(pdf_url: str):
         status_code = e.response.status_code
         detail = f"PDF download failed ({status_code}) for URL: {pdf_url}"
         print(detail)
-        # Return appropriate client/server error status
         raise HTTPException(status_code=status_code if status_code < 500 else 502, detail=detail)
     except httpx.RequestError as e:
         print(f"Network error downloading PDF: {e}")
@@ -694,13 +692,12 @@ async def pdf_to_html(pdf_url: str):
          raise HTTPException(status_code=500, detail="Internal error processing PDF file.")
     except Exception as e:
         print(f"Unexpected PDF conversion/processing error: {e}")
-        # print(traceback.format_exc()) # Optional for debugging
+        # print(traceback.format_exc()) # Optional
         raise HTTPException(status_code=500, detail=f"PDF processing failed unexpectedly: {e}")
     finally:
-        # Clean up temporary file using standard os module
+        # Clean up temporary file
         if tmp_name and os.path.exists(tmp_name):
             try:
-                # Synchronous remove is okay in finally
                 os.remove(tmp_name)
                 print(f"Temporary PDF file deleted: {tmp_name}")
             except OSError as e_remove:
