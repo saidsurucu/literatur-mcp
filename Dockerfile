@@ -34,8 +34,8 @@ EXPOSE 8000
 # --host 0.0.0.0: Dışarıdan erişim için tüm arayüzlere bağlanır.
 # --port 8000: Belirtilen portu kullanır.
 # --workers 1: Sadece tek bir işlem çalıştırır (Hafıza içi cache için ZORUNLU).
-#CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 
 # Alternatif CMD (Gunicorn ile tek worker):
 # Daha gelişmiş süreç yönetimi istenirse Gunicorn kullanılabilir, ancak worker sayısı 1 olmalı.
-CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--log-level", "info"]
+#CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--log-level", "info"]

@@ -9,4 +9,3 @@ markitdown
 httpx
 html5lib
 asyncio
-redis
