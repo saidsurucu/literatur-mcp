@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup
 from cachetools import TTLCache
 from fastapi import FastAPI, Body, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
-from markitdown import MarkItDown
+import fitz 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError, Page, BrowserContext
 from pydantic import BaseModel, Field
 
@@ -87,6 +87,23 @@ def generate_links_cache_key(params: SearchParams) -> Any:
     sorted_items = tuple(sorted(key_data.items()))
     cache_key = (sorted_items, params.dergipark_page)
     return cache_key
+
+
+# --- Fitz için Yardımcı Senkron Fonksiyon ---
+def _extract_text_with_fitz_sync(pdf_path: str) -> str:
+    """Synchronous helper to extract text using PyMuPDF."""
+    extracted_text = ""
+    try:
+        doc = fitz.open(pdf_path)
+        for page in doc: # Sayfalar üzerinde döngü
+            extracted_text += page.get_text("text") # Sayfanın metnini al ve ekle
+        doc.close()
+        return extracted_text
+    except Exception as e:
+        print(f"PyMuPDF (fitz) extraction failed in helper for '{pdf_path}': {e}")
+        raise # Hatanın ana try/except bloğunda yakalanmasını sağla
+
+
 
 # --- Playwright Functions ---
 async def get_playwright_page(p: async_playwright) -> tuple[Any, BrowserContext, Page]:
@@ -656,17 +673,19 @@ async def pdf_to_html(pdf_url: str):
         if not tmp_name or not os.path.exists(tmp_name):
             raise FileNotFoundError("Temporary PDF file not found after write.")
 
-        # Convert PDF to Markdown
-        print(f"Converting PDF {tmp_name} to Markdown...")
-        md = MarkItDown()
+        # --- PDF Metin Çıkarma: MarkItDown yerine PyMuPDF (fitz) ---
         try:
-            markdown_result = await asyncio.to_thread(md.convert, tmp_name)
-            markdown_text = markdown_result.text_content if markdown_result else "Conversion failed or produced no text."
+            print(f"Converting PDF {tmp_name} to text using PyMuPDF (fitz)...")
+            # Senkron fitz fonksiyonunu ayrı bir thread'de çalıştır
+            markdown_text = await asyncio.to_thread(_extract_text_with_fitz_sync, tmp_name)
+            if not markdown_text: # Başarısız veya boşsa
+                print(f"Warning: PyMuPDF (fitz) produced empty text for {tmp_name}.")
+                markdown_text = "PDF içeriği okunamadı veya boş." # Varsayılan mesaj
+            print(f"Conversion result length: {len(markdown_text)}")
         except Exception as convert_err:
-            print(f"MarkItDown conversion failed: {convert_err}")
-            raise HTTPException(status_code=500, detail=f"PDF to Markdown conversion error: {convert_err}")
+            print(f"PyMuPDF (fitz) conversion failed: {convert_err}")
+            raise HTTPException(status_code=500, detail=f"PDF metin çıkarma hatası: {convert_err}")
 
-        print(f"Conversion result length: {len(markdown_text)}")
 
         # Prepare HTML response safely
         escaped_pdf_url = html.escape(pdf_url)
