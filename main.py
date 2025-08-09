@@ -50,11 +50,17 @@ HEADLESS_MODE = os.getenv("HEADLESS_MODE", "true").lower() == "true"
 PDF_CACHE_TTL = int(os.getenv("PDF_CACHE_TTL", 86400))
 pdf_cache = TTLCache(maxsize=500, ttl=PDF_CACHE_TTL)
 
+# --- Browser Pool Configuration ---
+BROWSER_POOL_SIZE = 2
+browser_pool = []
+playwright_instance = None
+pool_lock = asyncio.Lock()
+
 # --- FastAPI App Initialization ---
 app = FastAPI(
-    title="DergiPark Scraper API (In-Memory Cache)",
-    version="1.11.3", # Girintileme düzeltmeleri için versiyon güncellendi
-    description="API to search DergiPark articles with pagination. Uses in-memory cache for session cookies and links (requires single worker process).",
+    title="DergiPark Scraper API (Browser Pool + In-Memory Cache)",
+    version="1.12.0", # Browser pooling için versiyon güncellendi
+    description="API to search DergiPark articles with browser pooling for better performance and reduced CAPTCHA challenges.",
 )
 
 # --- API Key Check ---
@@ -65,7 +71,7 @@ if CAPSOLVER_API_KEY == "YOUR_CAPSOLVER_API_KEY_HERE" or not CAPSOLVER_API_KEY:
 # --- Pydantic Models ---
 class SearchParams(BaseModel):
     title: Optional[str] = Field(None); running_title: Optional[str] = Field(None); journal: Optional[str] = Field(None); issn: Optional[str] = Field(None); eissn: Optional[str] = Field(None); abstract: Optional[str] = Field(None); keywords: Optional[str] = Field(None); doi: Optional[str] = Field(None); doi_url: Optional[str] = Field(None); doi_prefix: Optional[str] = Field(None); author: Optional[str] = Field(None); orcid: Optional[str] = Field(None); institution: Optional[str] = Field(None); translator: Optional[str] = Field(None); pubyear: Optional[str] = Field(None); citation: Optional[str] = Field(None)
-    dergipark_page: int = Field(default=1, ge=1); api_page: int = Field(default=1, ge=1); page_size: int = Field(default=5, ge=1, le=20)
+    dergipark_page: int = Field(default=1, ge=1); api_page: int = Field(default=1, ge=1)
     sort_by: Optional[Literal["newest", "oldest"]] = Field(None)
     article_type: Optional[Literal["54", "56", "58", "55", "60", "65", "57", "1", "5", "62", "73", "2", "10", "59", "66", "72"]] = Field(None)
     index_filter: Optional[Literal["tr_dizin_icerenler", "bos_olmayanlar", "hepsi"]] = Field(default="hepsi")
@@ -82,7 +88,7 @@ def truncate_text(text: str, word_limit: int) -> str:
 
 def generate_links_cache_key(params: SearchParams) -> Any:
     """Generates a hashable cache key for TTLCache based on search parameters."""
-    key_data = params.model_dump(exclude={'api_page', 'page_size'}, exclude_unset=True, mode='python')
+    key_data = params.model_dump(exclude={'api_page'}, exclude_unset=True, mode='python')
     # Use tuple of sorted items as dicts are not hashable
     sorted_items = tuple(sorted(key_data.items()))
     cache_key = (sorted_items, params.dergipark_page)
@@ -105,44 +111,114 @@ def _extract_text_with_fitz_sync(pdf_path: str) -> str:
 
 
 
-# --- Playwright Functions ---
-async def get_playwright_page(p: async_playwright) -> tuple[Any, BrowserContext, Page]:
-    """Initializes Playwright browser, context, and a new page."""
-    try:
-        print(f"Launching browser (Headless: {HEADLESS_MODE})...")
-        browser = await p.chromium.launch(headless=HEADLESS_MODE, args=['--disable-dev-shm-usage','--no-sandbox'])
-        context = await browser.new_context(
-            user_agent=random.choice(USER_AGENTS),
-            locale='tr-TR',
-            viewport={'width': 1920, 'height': 1080},
-            ignore_https_errors=True
+# --- Browser Pool Management ---
+class BrowserPool:
+    def __init__(self):
+        self.browsers = []
+        self.authenticated_browsers = set()  # Track CAPTCHA-solved browsers
+        self.lock = asyncio.Lock()
+    
+    async def initialize(self):
+        """Initialize browser pool on startup."""
+        global playwright_instance
+        try:
+            print(f"Initializing browser pool with {BROWSER_POOL_SIZE} browsers...")
+            playwright_instance = await async_playwright().start()
+            
+            for i in range(BROWSER_POOL_SIZE):
+                browser = await self.create_browser()
+                self.browsers.append(browser)
+                print(f"Browser {i+1}/{BROWSER_POOL_SIZE} created")
+            
+            print("Browser pool initialization complete!")
+        except Exception as e:
+            print(f"Failed to initialize browser pool: {e}")
+            raise
+    
+    async def create_browser(self):
+        """Create a single browser instance."""
+        browser = await playwright_instance.chromium.launch(
+            headless=HEADLESS_MODE,
+            args=['--disable-dev-shm-usage', '--no-sandbox']
         )
-        page = await context.new_page()
-        print("Browser page created.")
-        return browser, context, page
-    except Exception as e:
-        print(f"FATAL: PW init error: {e}")
-        # Consider logging full traceback here
-        # print(traceback.format_exc())
-        raise HTTPException(status_code=503, detail=f"Browser service unavailable: {e}")
+        return browser
+    
+    async def get_browser_and_context(self) -> tuple[Any, BrowserContext, Page]:
+        """Get browser from pool and create new context."""
+        async with self.lock:
+            if not self.browsers:
+                raise HTTPException(503, "No browsers available in pool")
+            
+            # Prefer authenticated browsers first
+            browser = None
+            for b in self.browsers:
+                if b in self.authenticated_browsers and b.is_connected():
+                    browser = b
+                    break
+            
+            # Fallback to any available browser
+            if not browser:
+                for b in self.browsers:
+                    if b.is_connected():
+                        browser = b
+                        break
+            
+            if not browser:
+                print("No healthy browser found, creating new one...")
+                browser = await self.create_browser()
+                self.browsers[0] = browser  # Replace first browser
+            
+            # Create fresh context
+            context = await browser.new_context(
+                user_agent=random.choice(USER_AGENTS),
+                locale='tr-TR',
+                viewport={'width': 1920, 'height': 1080},
+                ignore_https_errors=True
+            )
+            page = await context.new_page()
+            
+            print(f"Using browser from pool (authenticated: {browser in self.authenticated_browsers})")
+            return browser, context, page
+    
+    async def mark_authenticated(self, browser):
+        """Mark browser as CAPTCHA-solved."""
+        async with self.lock:
+            self.authenticated_browsers.add(browser)
+            print("Browser marked as authenticated")
+    
+    async def cleanup(self):
+        """Close all browsers in pool."""
+        print("Cleaning up browser pool...")
+        async with self.lock:
+            for browser in self.browsers:
+                try:
+                    if browser.is_connected():
+                        await browser.close()
+                except Exception as e:
+                    print(f"Error closing browser: {e}")
+            self.browsers.clear()
+            self.authenticated_browsers.clear()
+        
+        if playwright_instance:
+            try:
+                await playwright_instance.stop()
+                print("Playwright instance stopped")
+            except Exception as e:
+                print(f"Error stopping playwright: {e}")
 
-async def close_playwright(browser, context, page):
-    """Safely closes Playwright resources."""
-    print("--- PW Cleanup ---")
-    closed = []
+# Global browser pool instance
+browser_pool_manager = BrowserPool()
+
+async def close_context_and_page(context, page):
+    """Safely close context and page (keep browser in pool)."""
     try:
         if page and not page.is_closed():
-            await page.close(); closed.append("Page")
+            await page.close()
         if context:
-            await context.close(); closed.append("Context")
-        if browser and browser.is_connected():
-            await browser.close(); closed.append("Browser")
-        print(f"PW close attempted: {', '.join(closed) or 'None needed'}")
+            await context.close()
     except Exception as e:
-        # Ignore errors if target is already closed
-        if "Target page" not in str(e) and "closed" not in str(e).lower():
-            print(f"Warning: Error closing PW resource: {e}")
-    print("--- PW Cleanup Finished ---")
+        if "closed" not in str(e).lower():
+            print(f"Warning: Error closing context/page: {e}")
 
 
 async def get_article_details_pw(page: Page, article_url: str, referer_url: Optional[str] = None) -> dict:
@@ -465,7 +541,7 @@ async def get_article_links_with_cache(
         except Exception as e:
             print(f"Warning: Links cache SET error for key {str(cache_key)[:100]}...: {e}")
 
-        # 6. Save Cookies if CAPTCHA was solved during this run
+        # 6. Save Cookies and Mark Browser as Authenticated if CAPTCHA was solved
         if captcha_was_solved:
             try:
                 print("Saving cookies post-CAPTCHA to in-memory cache...")
@@ -479,6 +555,10 @@ async def get_article_links_with_cache(
                     # Store using the constant key
                     cookie_cache[COOKIES_CACHE_KEY] = current_cookies
                     print(f"Saved {len(current_cookies)} cookies to cache '{COOKIES_CACHE_KEY}' (TTL: {COOKIES_TTL}s).")
+                    
+                    # Mark this browser as authenticated in the pool
+                    browser = page.context.browser
+                    await browser_pool_manager.mark_authenticated(browser)
                 else:
                     print("No relevant cookies found to save.")
             except Exception as e:
@@ -524,23 +604,23 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     """Search DergiPark articles. Uses in-memory cache. REQUIRES SINGLE WORKER."""
     # --- Construct DergiPark Search URL ---
     base_url = "https://dergipark.org.tr/tr/search"; query_params = {}
-    search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'dergipark_page', 'api_page', 'page_size', 'sort_by', 'article_type', 'index_filter'}, exclude_unset=True).items())
+    search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'dergipark_page', 'api_page', 'sort_by', 'article_type', 'index_filter'}, exclude_unset=True).items())
     if search_q: query_params['q'] = search_q
     query_params['section'] = 'articles'
     if search_params.dergipark_page > 1: query_params['page'] = search_params.dergipark_page
     if search_params.article_type: query_params['aggs[articleType.id][0]'] = search_params.article_type
     if search_params.sort_by: query_params['sortBy'] = search_params.sort_by
     target_search_url = f"{base_url}?{urllib.parse.urlencode(query_params, quote_via=urllib.parse.quote)}"
-    print(f"Target DP URL: {target_search_url} | API Page: {search_params.api_page} | Size: {search_params.page_size}")
+    page_size = 5  # Fixed page size
+    print(f"Target DP URL: {target_search_url} | API Page: {search_params.api_page} | Size: {page_size}")
 
     host = str(request.base_url).rstrip('/')
     browser = context = page = playwright_instance = None
     total_items_on_page = 0
 
     try:
-        # --- Start Playwright ---
-        playwright_instance = await async_playwright().start()
-        browser, context, page = await get_playwright_page(playwright_instance)
+        # --- Get Browser from Pool ---
+        browser, context, page = await browser_pool_manager.get_browser_and_context()
 
         # --- Attempt to Inject Cookies from In-Memory Cache ---
         try:
@@ -570,16 +650,16 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
 
         # --- Process Results & Pagination ---
         total_items_on_page = len(full_link_list)
-        total_api_pages = math.ceil(total_items_on_page / search_params.page_size) if total_items_on_page > 0 else 0
-        pagination_info = {"api_page": search_params.api_page, "page_size": search_params.page_size, "total_items_on_dergipark_page": total_items_on_page, "total_api_pages_for_dergipark_page": total_api_pages}
+        total_api_pages = math.ceil(total_items_on_page / page_size) if total_items_on_page > 0 else 0
+        pagination_info = {"api_page": search_params.api_page, "page_size": page_size, "total_items_on_dergipark_page": total_items_on_page, "total_api_pages_for_dergipark_page": total_api_pages}
 
         # Handle case where no articles found on DergiPark page
         if total_items_on_page == 0:
             return JSONResponse(content={"pagination": pagination_info, "articles": []})
 
-        # Calculate slice
-        offset = (search_params.api_page - 1) * search_params.page_size
-        limit = search_params.page_size
+        # Calculate slice - always process only 5 articles
+        offset = (search_params.api_page - 1) * page_size
+        limit = page_size
         links_to_process = full_link_list[offset : offset + limit]
         print(f"Links: Total={total_items_on_page}, Slice={len(links_to_process)} (API Page {search_params.api_page}/{total_api_pages})")
 
@@ -630,8 +710,9 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
         print(f"General search error: {e}\n{traceback.format_exc()}")
         return JSONResponse(status_code=500, content={"detail": f"Unexpected search error: {e}"})
     finally:
-        # Ensure Playwright is closed
-        await close_playwright(browser, context, page)
+        # Close only context and page (keep browser in pool)
+        if context or page:
+            await close_context_and_page(context, page)
 
 
 @app.get("/api/pdf-to-html", response_class=HTMLResponse)
@@ -723,13 +804,33 @@ async def pdf_to_html(pdf_url: str):
                 print(f"Error removing temporary file {tmp_name}: {e_remove}")
 
 
+# --- FastAPI Lifecycle Events ---
+@app.on_event("startup")
+async def startup_event():
+    """Initialize browser pool on startup."""
+    print("=== APPLICATION STARTUP ===")
+    await browser_pool_manager.initialize()
+    print("=== STARTUP COMPLETE ===")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up browser pool on shutdown."""
+    print("=== APPLICATION SHUTDOWN ===")
+    await browser_pool_manager.cleanup()
+    print("=== SHUTDOWN COMPLETE ===")
+
 # --- Local Development Runner ---
 if __name__ == "__main__":
     import uvicorn
-    print("--- Starting FastAPI Application (In-Memory Cache Strategy) ---")
+    print("--- Starting FastAPI Application (Browser Pool + In-Memory Cache Strategy) ---")
     print("--- WARNING: Requires running with a SINGLE WORKER PROCESS (--workers 1) for cache effectiveness ---")
     print(f"Headless mode: {HEADLESS_MODE}")
-    print("API available at: http://127.0.0.1:8000")
+    print(f"Browser pool size: {BROWSER_POOL_SIZE}")
+    
+    # Get port from environment (Fly.io sets this automatically)
+    port = int(os.getenv("PORT", 8000))
+    print(f"API available at: http://0.0.0.0:{port}")
     print(f"CapSolver Key Provided: {'Yes' if CAPSOLVER_API_KEY != 'YOUR_CAPSOLVER_API_KEY_HERE' and CAPSOLVER_API_KEY else 'NO'}")
+    
     # Run with 1 worker explicitly, disable reload for stability if testing functionality
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False, workers=1)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False, workers=1)
