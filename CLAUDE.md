@@ -100,14 +100,17 @@ Note: No formal test framework is configured. The `test.py` file is a simple hel
 
 ### Environment Variables
 
-- `CAPSOLVER_API_KEY`: Required for CAPTCHA solving (defaults to hardcoded key in main.py)
+- `CAPSOLVER_API_KEY`: Required for CapSolver CAPTCHA solving (defaults to hardcoded key in main.py)
+- `USE_BROWSER_USE`: Enable browser-use AI CAPTCHA solver (default: "false")
+- `GEMINI_API_KEY`: Required for browser-use AI CAPTCHA solver (Google Gemini API key)
 - `HEADLESS_MODE`: Set to "false" for non-headless browser mode (default: "true")
 - `PDF_CACHE_TTL`: TTL for PDF cache in seconds (default: 86400)
 
 ### Cache Configuration
 
-- **Cookies Cache**: TTL=1800s, Max=10 sets
-- **Article Links Cache**: TTL=600s, Max=100 lists  
+- **Cookies Cache**: TTL=1800s, Max=10 sets (in-memory + disk persistence)
+- **Cookie Disk File**: `cookies_persistent.pkl` (survives server restarts)
+- **Article Links Cache**: TTL=600s, Max=100 lists
 - **PDF Cache**: TTL=86400s (configurable), Max=500 items
 
 ## API Endpoints
@@ -137,7 +140,27 @@ The application MUST run with exactly one worker process (`--workers 1`) because
 
 ### CAPTCHA Handling
 
-The application automatically detects and solves reCAPTCHA v2 challenges using the CapSolver API. If CAPTCHA solving fails, the API returns HTTP 429 status.
+The application supports two methods for solving CAPTCHA challenges:
+
+1. **Browser-use AI Solver** (Primary, if enabled): Uses Google Gemini LLM to intelligently interact with CAPTCHA challenges
+   - Enable with `USE_BROWSER_USE=true` and provide `GEMINI_API_KEY`
+   - More natural and human-like behavior
+   - May have better success rates for complex CAPTCHAs
+
+2. **CapSolver API** (Fallback): Traditional token-based CAPTCHA solving service
+   - Supports both reCAPTCHA v2 and Cloudflare Turnstile
+   - Automatically used if browser-use fails or is not configured
+   - Requires `CAPSOLVER_API_KEY`
+
+**CAPTCHA Flow:**
+- After CAPTCHA is solved, the application automatically clicks on the "Makale" (Articles) section to load article results
+- Cookies are saved both to memory and disk for persistence across server restarts
+- If both methods fail, the API returns HTTP 429 status
+
+**Cookie Persistence:**
+- Cookies are stored in-memory (TTL: 30 minutes) for fast access
+- Cookies are also saved to disk (`cookies_persistent.pkl`) to survive server restarts
+- On startup, the application loads cookies from disk if available and not expired
 
 ### Rate Limiting
 
@@ -156,6 +179,7 @@ Comprehensive error handling with specific HTTP status codes:
 ## File Structure
 
 - `main.py`: Core application with all endpoints and scraping logic
+- `cookies_persistent.pkl`: Disk-persisted cookies (auto-generated, survives restarts)
 - `test.py`: Simple test script
 - `hello.py`: Hello world script
 - `requirements.txt`: Python dependencies

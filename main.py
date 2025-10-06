@@ -6,6 +6,7 @@ import io
 import json
 import math
 import os # OS modülü import edildi
+import pickle
 import random
 import tempfile
 import traceback
@@ -31,6 +32,36 @@ ARTICLE_LINKS_TTL = 600; MAX_LINK_LISTS = 100
 cookie_cache = TTLCache(maxsize=MAX_COOKIE_SETS, ttl=COOKIES_TTL)
 links_cache = TTLCache(maxsize=MAX_LINK_LISTS, ttl=ARTICLE_LINKS_TTL)
 COOKIES_CACHE_KEY = "dergipark_scraper:session:last_cookies"
+COOKIES_FILE_PATH = "cookies_persistent.pkl"
+
+# Helper functions for persistent cookie storage
+def save_cookies_to_disk(cookies):
+    """Save cookies to disk using pickle"""
+    try:
+        with open(COOKIES_FILE_PATH, 'wb') as f:
+            pickle.dump({'cookies': cookies, 'timestamp': time.time()}, f)
+        print(f"Cookies saved to disk: {COOKIES_FILE_PATH}")
+    except Exception as e:
+        print(f"Failed to save cookies to disk: {e}")
+
+def load_cookies_from_disk():
+    """Load cookies from disk if they exist and are fresh"""
+    try:
+        if not os.path.exists(COOKIES_FILE_PATH):
+            return None
+        with open(COOKIES_FILE_PATH, 'rb') as f:
+            data = pickle.load(f)
+        # Check if cookies are still valid (within TTL)
+        age = time.time() - data['timestamp']
+        if age > COOKIES_TTL:
+            print(f"Disk cookies expired (age: {age:.0f}s > {COOKIES_TTL}s)")
+            os.remove(COOKIES_FILE_PATH)
+            return None
+        print(f"Loaded {len(data['cookies'])} cookies from disk (age: {age:.0f}s)")
+        return data['cookies']
+    except Exception as e:
+        print(f"Failed to load cookies from disk: {e}")
+        return None
 
 # CapSolver Ayarları
 CAPSOLVER_API_KEY = os.getenv("CAPSOLVER_API_KEY", "CAP-1E1D6F5F97285F22927DFC04FA04116A4A5FCC9211E28F36195D8372CC7D6739")
@@ -70,6 +101,7 @@ if CAPSOLVER_API_KEY == "YOUR_CAPSOLVER_API_KEY_HERE" or not CAPSOLVER_API_KEY:
 
 # --- Pydantic Models ---
 class SearchParams(BaseModel):
+    q: Optional[str] = Field(None)  # Simple direct search query
     title: Optional[str] = Field(None); running_title: Optional[str] = Field(None); journal: Optional[str] = Field(None); issn: Optional[str] = Field(None); eissn: Optional[str] = Field(None); abstract: Optional[str] = Field(None); keywords: Optional[str] = Field(None); doi: Optional[str] = Field(None); doi_url: Optional[str] = Field(None); doi_prefix: Optional[str] = Field(None); author: Optional[str] = Field(None); orcid: Optional[str] = Field(None); institution: Optional[str] = Field(None); translator: Optional[str] = Field(None); pubyear: Optional[str] = Field(None); citation: Optional[str] = Field(None)
     dergipark_page: int = Field(default=1, ge=1); api_page: int = Field(default=1, ge=1)
     sort_by: Optional[Literal["newest", "oldest"]] = Field(None)
@@ -316,13 +348,18 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
     return {'details': details, 'pdf_url': pdf_url, 'indices': indices}
 
 
-async def _inject_and_submit_captcha(page: Page, token: str, verification_submit_selector: str) -> bool:
+async def _inject_and_submit_captcha(page: Page, token: str, verification_submit_selector: str, captcha_type: str = "recaptcha") -> bool:
     """Helper: Injects token (with events), clicks submit, checks result."""
-    injection_target_selector = '#g-recaptcha-response'
-    try:
-        print(f"Injecting token via JS: {token[:15]}...")
-        # Minified JS for injection + events
+    # Select injection target based on CAPTCHA type
+    if captcha_type == "turnstile":
+        injection_target_selector = '[name="cf-turnstile-response"]'
+        js_func = """(t)=>{let e=document.querySelector('[name="cf-turnstile-response"]');if(e){console.log('Injecting Turnstile token...');e.value=t;e.dispatchEvent(new Event('input',{bubbles:!0}));e.dispatchEvent(new Event('change',{bubbles:!0}));console.log('Injected/dispatched.');return!0}return console.error('cf-turnstile-response missing!'),!1}"""
+    else:  # recaptcha
+        injection_target_selector = '#g-recaptcha-response'
         js_func = """(t)=>{let e=document.getElementById('g-recaptcha-response');if(e){console.log('Injecting token...');e.value=t;e.dispatchEvent(new Event('input',{bubbles:!0}));e.dispatchEvent(new Event('change',{bubbles:!0}));console.log('Injected/dispatched.');return!0}return console.error('#g-recaptcha-response missing!'),!1}"""
+
+    try:
+        print(f"Injecting {captcha_type} token via JS: {token[:15]}...")
         injection_success = await page.evaluate(js_func, token)
         if not injection_success:
             print(f"Error: Injection JS failed, target '{injection_target_selector}' not found?.")
@@ -345,7 +382,7 @@ async def _inject_and_submit_captcha(page: Page, token: str, verification_submit
             # Verify navigation was successful (not still on verification page)
             current_url = page.url
             print(f"URL after submit: {current_url}")
-            if "/search-verification" in current_url:
+            if "verification" in current_url:
                 print("Submission failed: Still on verification page.")
                 return False
             else:
@@ -386,12 +423,35 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
             print("Sitekey element found.")
         except (PlaywrightTimeoutError, ValueError, Exception) as e:
             print(f"Error finding/getting sitekey: {e}")
-            return False # Cannot proceed
+            # Try fallback: extract sitekey from page source
+            print("Trying fallback: extracting sitekey from page source...")
+            page_content = await page.content()
+            import re
+            sitekey_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', page_content)
+            if sitekey_match:
+                site_key = sitekey_match.group(1)
+                print(f"Sitekey found via regex: {site_key}")
+            else:
+                print("Fallback failed: No sitekey found in page source.")
+                return False # Cannot proceed
 
         print(f"Sitekey: {site_key}, URL: {page_url}")
 
+        # --- Determine CAPTCHA Type ---
+        # Cloudflare Turnstile keys start with 0x4, reCAPTCHA keys start with 6L
+        if site_key.startswith("0x4"):
+            task_type = "AntiTurnstileTaskProxyLess"
+            captcha_type = "turnstile"
+            injection_target_selector = '[name="cf-turnstile-response"]'
+            print("Detected Cloudflare Turnstile CAPTCHA")
+        else:
+            task_type = "ReCaptchaV2TaskProxyless"
+            captcha_type = "recaptcha"
+            injection_target_selector = '#g-recaptcha-response'
+            print("Detected reCAPTCHA v2")
+
         # --- Call CapSolver API ---
-        task_payload = {"clientKey": CAPSOLVER_API_KEY, "task": {"type": "ReCaptchaV2TaskProxyless", "websiteURL": page_url, "websiteKey": site_key}}
+        task_payload = {"clientKey": CAPSOLVER_API_KEY, "task": {"type": task_type, "websiteURL": page_url, "websiteKey": site_key}}
         captcha_token = None
         async with httpx.AsyncClient(timeout=20.0) as client:
             # Create Task
@@ -423,7 +483,10 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
                     status = get_result.get("status")
                     print(f"Task status: {status}")
                     if status == "ready":
-                        solution = get_result.get("solution"); captcha_token = solution.get("gRecaptchaResponse") if solution else None
+                        solution = get_result.get("solution")
+                        if solution:
+                            # Try both field names - Turnstile uses "token", reCAPTCHA uses "gRecaptchaResponse"
+                            captcha_token = solution.get("token") or solution.get("gRecaptchaResponse")
                         if captcha_token: print("CapSolver solution received!"); break
                         else: raise ValueError("Task ready but no token.")
                     elif status in ["failed", "error"]:
@@ -449,7 +512,7 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
             return False
 
         # Inject and submit
-        submission_successful = await _inject_and_submit_captcha(page, captcha_token, verification_submit_selector)
+        submission_successful = await _inject_and_submit_captcha(page, captcha_token, verification_submit_selector, captcha_type)
 
         if not submission_successful:
             print("Submission failed with the new token from CapSolver.")
@@ -489,36 +552,69 @@ async def get_article_links_with_cache(
         print(f"Nav complete. URL: {page.url}")
 
         # 3. Handle CAPTCHA if redirected
-        if "/search-verification" in page.url:
+        if "/search/verification" in page.url or "verification" in page.url:
             print("CAPTCHA page detected.")
             captcha_passed = await solve_recaptcha_v2_capsolver_direct_async(page)
             if not captcha_passed:
                 # If CAPTCHA fails, raise exception to stop processing this request
                 raise HTTPException(429, "CAPTCHA solving failed.")
-            print("CAPTCHA passed. Checking results page...")
+            print("CAPTCHA passed. Waiting for results page to load...")
             captcha_was_solved = True
-            # Ensure results page elements are visible after solve
+            # Wait for page to fully load after CAPTCHA
             try:
-                await page.wait_for_selector(article_card_selector, state="visible", timeout=15000)
-                print("Results page elements confirmed.")
-            except PlaywrightTimeoutError:
-                # If elements don't appear after CAPTCHA, something is wrong
-                raise HTTPException(500, f"Failed find results elements after CAPTCHA. URL: {page.url}")
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+                await page.wait_for_load_state("networkidle", timeout=20000)
+                print("Results page loaded after CAPTCHA.")
+            except Exception as e:
+                print(f"Load state wait warning: {e}")
+
         else:
             print("No CAPTCHA detected.")
 
+        # Click on "Makale" (articles) section to load article list (needed even without CAPTCHA)
+        try:
+            print("Looking for article section link to click...")
+            article_section_link = await page.query_selector('a.search-section-link[href*="section=article"]')
+            if article_section_link:
+                print("Clicking on article section...")
+                await article_section_link.click()
+                await page.wait_for_load_state("networkidle", timeout=20000)
+                print("Article section loaded.")
+            else:
+                print("Article section link not found, may already be on articles page.")
+        except Exception as e:
+            print(f"Warning: Could not click article section: {e}")
+
         # 4. Extract Article Links
         try:
-            # Wait briefly for cards to be attached to DOM
-            await page.wait_for_selector(article_card_selector, state="attached", timeout=10000)
+            # Wait for cards to be attached to DOM
+            print(f"Waiting for article cards with selector: {article_card_selector}")
+            await page.wait_for_selector(article_card_selector, state="attached", timeout=15000)
             article_cards = await page.query_selector_all(article_card_selector)
             print(f"{len(article_cards)} article cards found.")
         except PlaywrightTimeoutError:
             # If cards timeout, check for "no results" message
-            if "sonuç bulunamadı" in (await page.content()).lower():
+            page_content = await page.content()
+            if "sonuç bulunamadı" in page_content.lower():
                 print("No results message detected.")
                 article_links = [] # Explicitly set to empty list
             else:
+                # Debug: try to find what's on the page
+                print(f"DEBUG: Searching for alternative selectors...")
+                alt_cards = await page.query_selector_all("div.card")
+                print(f"DEBUG: Found {len(alt_cards)} elements with class 'card'")
+                article_divs = await page.query_selector_all("div.article-card")
+                print(f"DEBUG: Found {len(article_divs)} elements with class 'article-card'")
+
+                # Take screenshot for debugging
+                await page.screenshot(path="debug_search_results.png")
+                print("DEBUG: Screenshot saved to debug_search_results.png")
+
+                # Save page HTML for inspection
+                with open("debug_page.html", "w", encoding="utf-8") as f:
+                    f.write(page_content)
+                print("DEBUG: Page HTML saved to debug_page.html")
+
                 # If no results message and no cards, raise error
                 raise HTTPException(500, "Link extraction failed (timeout finding cards).")
 
@@ -555,6 +651,8 @@ async def get_article_links_with_cache(
                     # Store using the constant key
                     cookie_cache[COOKIES_CACHE_KEY] = current_cookies
                     print(f"Saved {len(current_cookies)} cookies to cache '{COOKIES_CACHE_KEY}' (TTL: {COOKIES_TTL}s).")
+                    # Also save to disk for persistence across restarts
+                    save_cookies_to_disk(current_cookies)
                     
                     # Mark this browser as authenticated in the pool
                     browser = page.context.browser
@@ -604,8 +702,17 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     """Search DergiPark articles. Uses in-memory cache. REQUIRES SINGLE WORKER."""
     # --- Construct DergiPark Search URL ---
     base_url = "https://dergipark.org.tr/tr/search"; query_params = {}
-    search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'dergipark_page', 'api_page', 'sort_by', 'article_type', 'index_filter'}, exclude_unset=True).items())
-    if search_q: query_params['q'] = search_q
+    # If direct 'q' param provided, use it. Otherwise build from specific fields
+    if search_params.q:
+        query_params['q'] = search_params.q
+    else:
+        # Build search query from all provided fields (excluding q, pagination, etc)
+        search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'q', 'dergipark_page', 'api_page', 'sort_by', 'article_type', 'index_filter'}, exclude_unset=True).items())
+        if search_q:
+            query_params['q'] = search_q
+        else:
+            # If no search params provided, search for everything
+            query_params['q'] = '*'
     query_params['section'] = 'articles'
     if search_params.dergipark_page > 1: query_params['page'] = search_params.dergipark_page
     if search_params.article_type: query_params['aggs[articleType.id][0]'] = search_params.article_type
@@ -622,10 +729,19 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
         # --- Get Browser from Pool ---
         browser, context, page = await browser_pool_manager.get_browser_and_context()
 
-        # --- Attempt to Inject Cookies from In-Memory Cache ---
+        # --- Attempt to Inject Cookies from Cache (Memory or Disk) ---
         try:
             print(f"Checking in-memory cache for cookies: {COOKIES_CACHE_KEY}")
             saved_cookies = cookie_cache.get(COOKIES_CACHE_KEY) # Use global cache
+
+            # If not in memory, try loading from disk
+            if not saved_cookies:
+                print("Memory cache miss, checking disk...")
+                saved_cookies = load_cookies_from_disk()
+                if saved_cookies:
+                    # Load into memory cache too
+                    cookie_cache[COOKIES_CACHE_KEY] = saved_cookies
+
             if saved_cookies:
                  required_keys={'name','value','domain','path'}; valid_cookies=[]
                  for c in saved_cookies:
