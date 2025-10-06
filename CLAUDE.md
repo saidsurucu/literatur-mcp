@@ -50,7 +50,43 @@ docker build -t dergipark-api .
 docker run -p 8000:8000 -e CAPSOLVER_API_KEY=your_key_here dergipark-api
 ```
 
-### Fly.io Deployment
+### Modal.com Deployment (Serverless)
+
+**Initial Setup:**
+```bash
+# Install Modal SDK
+uv add modal
+
+# Authenticate
+modal token new
+```
+
+**Development Mode (with hot reload):**
+```bash
+modal serve modal_app.py
+```
+
+**Production Deployment:**
+```bash
+modal deploy modal_app.py
+```
+
+**Set Environment Variables:**
+```bash
+modal secret create dergipark-secrets CAPSOLVER_API_KEY=your_actual_key_here
+```
+
+**Important Modal Notes:**
+- Serverless deployment with pay-per-use pricing (~$1-2/month for light usage)
+- Uses Microsoft's Playwright Python image (`mcr.microsoft.com/playwright/python:v1.51.0-jammy`)
+- Dependencies loaded from `requirements.txt`
+- Cookie persistence via Modal Volume (`dergipark-cookies`)
+- Cold start: ~55-82 seconds, warm requests: faster
+- Auto-scales to zero when not in use
+- Development URL: `https://[username]--dergipark-api-fastapi-app-dev.modal.run`
+- Production URL: `https://[username]--dergipark-api-fastapi-app.modal.run`
+
+### Fly.io Deployment (Always-on)
 
 **Initial Setup:**
 ```bash
@@ -87,6 +123,8 @@ flyctl scale count 1
 - Uses the existing Dockerfile which includes Playwright browser setup
 - Environment variables should be set via `flyctl secrets` for security
 - The health endpoint (`/health`) can be used for Fly.io health checks
+- Auto-stop/start machines feature reduces costs when idle (~$0-7/month)
+- Faster response times than serverless (no cold starts)
 
 ### Testing
 
@@ -179,6 +217,7 @@ Comprehensive error handling with specific HTTP status codes:
 ## File Structure
 
 - `main.py`: Core application with all endpoints and scraping logic
+- `modal_app.py`: Modal.com serverless deployment configuration
 - `cookies_persistent.pkl`: Disk-persisted cookies (auto-generated, survives restarts)
 - `test.py`: Simple test script
 - `hello.py`: Hello world script
