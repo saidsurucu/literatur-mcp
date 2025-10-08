@@ -170,10 +170,13 @@ Note: No formal test framework is configured. The `test.py` file is a simple hel
 The search endpoint accepts various academic search filters including:
 - Article metadata: title, author, DOI, keywords, abstract
 - Journal filters: journal name, ISSN, eISSN
+- **Publication year filter**: `publication_year` (e.g., "2022", "2024") - filters by exact year
 - Pagination: dergipark_page, api_page, page_size
 - Sorting: newest/oldest
-- Article type filtering
+- Article type filtering: `article_type` (e.g., "54" for research articles)
 - Index filtering (TR Dizin, etc.)
+
+**Important**: When filters like `publication_year` or `article_type` are used, the URL already contains `section=article`, so the code skips clicking the article section link to preserve these filters.
 
 ## Important Technical Notes
 

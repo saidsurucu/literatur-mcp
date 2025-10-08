@@ -107,6 +107,7 @@ class SearchParams(BaseModel):
     sort_by: Optional[Literal["newest", "oldest"]] = Field(None)
     article_type: Optional[Literal["54", "56", "58", "55", "60", "65", "57", "1", "5", "62", "73", "2", "10", "59", "66", "72"]] = Field(None)
     index_filter: Optional[Literal["tr_dizin_icerenler", "bos_olmayanlar", "hepsi"]] = Field(default="hepsi")
+    publication_year: Optional[str] = Field(None)  # Year filter (e.g., "2022")
 
 # --- Utility Functions ---
 def truncate_text(text: str, word_limit: int) -> str:
@@ -608,19 +609,30 @@ async def get_article_links_with_cache(
         else:
             print("No CAPTCHA detected.")
 
-        # Click on "Makale" (articles) section to load article list (needed even without CAPTCHA)
-        try:
-            print("Looking for article section link to click...")
-            article_section_link = await page.query_selector('a.search-section-link[href*="section=article"]')
-            if article_section_link:
-                print("Clicking on article section...")
-                await article_section_link.click()
-                await page.wait_for_load_state("networkidle", timeout=20000)
-                print("Article section loaded.")
-            else:
-                print("Article section link not found, may already be on articles page.")
-        except Exception as e:
-            print(f"Warning: Could not click article section: {e}")
+        # Click on "Makale" (articles) section ONLY if we're NOT already on article section
+        # (clicking would lose our URL filters like publication_year, article_type)
+        current_url = page.url
+        if "section=article" not in current_url:
+            try:
+                print("Not on article section yet, looking for article section link to click...")
+                article_section_link = await page.query_selector('a.search-section-link[href*="section=article"]')
+                if article_section_link:
+                    print("Clicking on article section...")
+                    await article_section_link.click()
+                    await page.wait_for_load_state("networkidle", timeout=20000)
+                    print("Article section loaded.")
+                else:
+                    print("Article section link not found.")
+            except Exception as e:
+                print(f"Warning: Could not click article section: {e}")
+        else:
+            print("Already on article section (URL contains section=article), skipping click to preserve filters.")
+
+        # Wait for client-side JavaScript filtering to complete
+        print("Waiting for client-side JavaScript filtering...")
+        await asyncio.sleep(3)  # Give JavaScript time to filter results
+        await page.wait_for_load_state("networkidle", timeout=10000)
+        print("JavaScript filtering should be complete.")
 
         # 4. Extract Article Links
         try:
@@ -744,16 +756,17 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
         query_params['q'] = search_params.q
     else:
         # Build search query from all provided fields (excluding q, pagination, etc)
-        search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'q', 'dergipark_page', 'api_page', 'sort_by', 'article_type', 'index_filter'}, exclude_unset=True).items())
+        search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'q', 'dergipark_page', 'api_page', 'sort_by', 'article_type', 'index_filter', 'publication_year'}, exclude_unset=True).items())
         if search_q:
             query_params['q'] = search_q
         else:
             # If no search params provided, search for everything
             query_params['q'] = '*'
-    query_params['section'] = 'articles'
+    query_params['section'] = 'article'
     if search_params.dergipark_page > 1: query_params['page'] = search_params.dergipark_page
-    if search_params.article_type: query_params['aggs[articleType.id][0]'] = search_params.article_type
+    if search_params.article_type: query_params['filter[article_type][]'] = search_params.article_type
     if search_params.sort_by: query_params['sortBy'] = search_params.sort_by
+    if search_params.publication_year: query_params['filter[publication_year][]'] = search_params.publication_year
     target_search_url = f"{base_url}?{urllib.parse.urlencode(query_params, quote_via=urllib.parse.quote)}"
     page_size = 5  # Fixed page size
     print(f"Target DP URL: {target_search_url} | API Page: {search_params.api_page} | Size: {page_size}")
