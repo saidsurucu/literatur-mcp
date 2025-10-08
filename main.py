@@ -366,13 +366,50 @@ async def _inject_and_submit_captcha(page: Page, token: str, verification_submit
             return False
 
         print("Token injection script executed successfully.")
-        await asyncio.sleep(random.uniform(0.5, 1.2)) # Brief pause
+
+        # For Turnstile, wait for the widget to process the token
+        if captcha_type == "turnstile":
+            print("Waiting for Turnstile to process token...")
+            await asyncio.sleep(random.uniform(2.0, 3.5))
+            # Try to unhide the submit button by removing kt-hidden class
+            try:
+                await page.evaluate("""
+                    () => {
+                        const submitBtn = document.querySelector('form[name="search_verification"] button[type="submit"]');
+                        if (submitBtn && submitBtn.classList.contains('kt-hidden')) {
+                            console.log('Removing kt-hidden class from submit button...');
+                            submitBtn.classList.remove('kt-hidden');
+                            return true;
+                        }
+                        return false;
+                    }
+                """)
+                print("Attempted to unhide submit button.")
+            except Exception as e:
+                print(f"Could not unhide button via JS: {e}")
+        else:
+            await asyncio.sleep(random.uniform(0.5, 1.2)) # Brief pause
 
         # Locate and click submit button
         submit_button = page.locator(verification_submit_selector)
         print(f"Looking for submit button ('{verification_submit_selector}')...")
         try:
-            await submit_button.wait_for(state="visible", timeout=7000)
+            # Wait for button to be attached first, then try to click even if hidden
+            await submit_button.wait_for(state="attached", timeout=7000)
+            # Try to force visibility and click
+            await page.evaluate("""
+                () => {
+                    const submitBtn = document.querySelector('form[name="search_verification"] button[type="submit"]');
+                    if (submitBtn) {
+                        submitBtn.classList.remove('kt-hidden');
+                        submitBtn.style.display = 'block';
+                        submitBtn.style.visibility = 'visible';
+                    }
+                }
+            """)
+            await asyncio.sleep(0.5)
+            # Now try to wait for visible state
+            await submit_button.wait_for(state="visible", timeout=5000)
             print("Clicking 'Devam Et' button...")
             # Wait for navigation to complete after click, using 'load' state
             async with page.expect_navigation(wait_until='load', timeout=35000):

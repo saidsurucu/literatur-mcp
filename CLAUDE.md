@@ -68,13 +68,18 @@ modal serve modal_app.py
 
 **Production Deployment:**
 ```bash
-modal deploy modal_app.py
+uv run modal deploy modal_app.py
 ```
 
 **Set Environment Variables:**
 ```bash
-modal secret create dergipark-secrets CAPSOLVER_API_KEY=your_actual_key_here
+uv run modal secret create dergipark-secrets CAPSOLVER_API_KEY=your_actual_key_here
 ```
+
+**Current Production Deployment:**
+- URL: `https://saidsrc--dergipark-api-fastapi-app.modal.run`
+- Dashboard: https://modal.com/apps/saidsrc/main/deployed/dergipark-api
+- Status: ✅ Active and working
 
 **Important Modal Notes:**
 - Serverless deployment with pay-per-use pricing (~$1-2/month for light usage)
@@ -191,6 +196,9 @@ The application supports two methods for solving CAPTCHA challenges:
    - Requires `CAPSOLVER_API_KEY`
 
 **CAPTCHA Flow:**
+- Detects both reCAPTCHA v2 and Cloudflare Turnstile automatically
+- For Turnstile: Token is injected, then waits 2-3.5s for widget processing
+- Submit button (`kt-hidden` class) is forcefully unhidden via JavaScript
 - After CAPTCHA is solved, the application automatically clicks on the "Makale" (Articles) section to load article results
 - Cookies are saved both to memory and disk for persistence across server restarts
 - If both methods fail, the API returns HTTP 429 status
