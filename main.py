@@ -751,12 +751,17 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     """Search DergiPark articles. Uses in-memory cache. REQUIRES SINGLE WORKER."""
     # --- Construct DergiPark Search URL ---
     base_url = "https://dergipark.org.tr/tr/search"; query_params = {}
+
+    # Handle backward compatibility: if pubyear is provided but publication_year is not, use pubyear for publication_year
+    if search_params.pubyear and not search_params.publication_year:
+        search_params.publication_year = search_params.pubyear
+
     # If direct 'q' param provided, use it. Otherwise build from specific fields
     if search_params.q:
         query_params['q'] = search_params.q
     else:
         # Build search query from all provided fields (excluding q, pagination, etc)
-        search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'q', 'dergipark_page', 'api_page', 'sort_by', 'article_type', 'index_filter', 'publication_year'}, exclude_unset=True).items())
+        search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'q', 'dergipark_page', 'api_page', 'sort_by', 'article_type', 'index_filter', 'publication_year', 'pubyear'}, exclude_unset=True).items())
         if search_q:
             query_params['q'] = search_q
         else:
