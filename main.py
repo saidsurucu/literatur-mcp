@@ -286,10 +286,7 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
 
             # --- Extract Meta Details ---
             raw_details = {tag.get('name'): tag.get('content','').strip() for tag in meta_tags if tag.get('name')}
-            pdf_url = raw_details.get('citation_pdf_url')
-            # Ensure PDF URL is absolute
-            if pdf_url and not pdf_url.startswith('http'):
-                pdf_url = f"https://dergipark.org.tr{pdf_url}" if pdf_url.startswith('/') else f"https://dergipark.org.tr/{pdf_url}"
+            pdf_url = raw_details.get('citation_pdf_url')  # This is usually a relative path like "/tr/download/article-file/123"
             journal_url_base = raw_details.get('DC.Source.URI') # Needed for index URL
             # Populate details dictionary carefully
             details = {
@@ -844,7 +841,13 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
             if article_details.get('error'):
                 article_data = {'title': link_info['title'], 'url': link_info['url'], 'error': f"Detail error: {article_details['error']}", 'details': None, 'indices': '', 'readable_pdf': None}
             else:
-                article_data = {'title': link_info['title'], 'url': link_info['url'], 'error': None, 'details': article_details, 'indices': indices_str, 'readable_pdf': f"{host}/api/pdf-to-html?pdf_url={urllib.parse.quote(pdf_url)}" if pdf_url else None}
+                # Construct full DergiPark PDF URL for the readable_pdf parameter
+                if pdf_url:
+                    full_pdf_url = f"https://dergipark.org.tr{pdf_url}" if pdf_url.startswith('/') else pdf_url
+                    readable_pdf_url = f"{host}/api/pdf-to-html?pdf_url={urllib.parse.quote(full_pdf_url)}"
+                else:
+                    readable_pdf_url = None
+                article_data = {'title': link_info['title'], 'url': link_info['url'], 'error': None, 'details': article_details, 'indices': indices_str, 'readable_pdf': readable_pdf_url}
 
             # Apply index filter
             passes = not (
