@@ -167,16 +167,20 @@ Note: No formal test framework is configured. The `test.py` file is a simple hel
 
 ### Search Parameters
 
-The search endpoint accepts various academic search filters including:
-- Article metadata: title, author, DOI, keywords, abstract
-- Journal filters: journal name, ISSN, eISSN
-- **Publication year filter**: `publication_year` (e.g., "2022", "2024") - filters by exact year
-- Pagination: dergipark_page, api_page, page_size
-- Sorting: newest/oldest
-- Article type filtering: `article_type` (e.g., "54" for research articles)
-- Index filtering (TR Dizin, etc.)
+The search endpoint accepts the following parameters:
+- **`q`**: Search query term (e.g., "milliyetçilik", "yapay zeka") - searches across all article fields
+- **`publication_year`**: Publication year filter (e.g., "2022", "2024") - filters by exact year
+- **`article_type`**: Article type filter (e.g., "54" for research articles)
+  - Available types: 54 (Research Article), 56, 58, 55, 60, 65, 57, 1, 5, 62, 73, 2, 10, 59, 66, 72
+- **`dergipark_page`**: DergiPark page number for pagination (default: 1)
+- **`api_page`**: API pagination page number (default: 1)
+- **`sort_by`**: Sort order - "newest" or "oldest"
+- **`index_filter`**: Index filter - "tr_dizin_icerenler", "bos_olmayanlar", or "hepsi" (default)
 
-**Important**: When filters like `publication_year` or `article_type` are used, the URL already contains `section=article`, so the code skips clicking the article section link to preserve these filters.
+**Important Notes:**
+- Field-specific searches (title:, author:, etc.) are NOT supported by DergiPark - use only the `q` parameter for search terms
+- When filters like `publication_year` or `article_type` are used, the URL already contains `section=article`, so the code skips clicking the article section link to preserve these filters
+- JavaScript filtering wait time: 3 seconds after page load to allow client-side filtering to complete
 
 ## Important Technical Notes
 

@@ -101,13 +101,13 @@ if CAPSOLVER_API_KEY == "YOUR_CAPSOLVER_API_KEY_HERE" or not CAPSOLVER_API_KEY:
 
 # --- Pydantic Models ---
 class SearchParams(BaseModel):
-    q: Optional[str] = Field(None)  # Simple direct search query
-    title: Optional[str] = Field(None); running_title: Optional[str] = Field(None); journal: Optional[str] = Field(None); issn: Optional[str] = Field(None); eissn: Optional[str] = Field(None); abstract: Optional[str] = Field(None); keywords: Optional[str] = Field(None); doi: Optional[str] = Field(None); doi_url: Optional[str] = Field(None); doi_prefix: Optional[str] = Field(None); author: Optional[str] = Field(None); orcid: Optional[str] = Field(None); institution: Optional[str] = Field(None); translator: Optional[str] = Field(None); pubyear: Optional[str] = Field(None); citation: Optional[str] = Field(None)
-    dergipark_page: int = Field(default=1, ge=1); api_page: int = Field(default=1, ge=1)
-    sort_by: Optional[Literal["newest", "oldest"]] = Field(None)
-    article_type: Optional[Literal["54", "56", "58", "55", "60", "65", "57", "1", "5", "62", "73", "2", "10", "59", "66", "72"]] = Field(None)
-    index_filter: Optional[Literal["tr_dizin_icerenler", "bos_olmayanlar", "hepsi"]] = Field(default="hepsi")
-    publication_year: Optional[str] = Field(None)  # Year filter (e.g., "2022")
+    q: Optional[str] = Field(None, description="Search query term (e.g., 'milliyetçilik')")
+    dergipark_page: int = Field(default=1, ge=1, description="DergiPark page number")
+    api_page: int = Field(default=1, ge=1, description="API pagination page number")
+    sort_by: Optional[Literal["newest", "oldest"]] = Field(None, description="Sort order")
+    article_type: Optional[Literal["54", "56", "58", "55", "60", "65", "57", "1", "5", "62", "73", "2", "10", "59", "66", "72"]] = Field(None, description="Article type filter (54=Research Article)")
+    publication_year: Optional[str] = Field(None, description="Publication year filter (e.g., '2022', '2024')")
+    index_filter: Optional[Literal["tr_dizin_icerenler", "bos_olmayanlar", "hepsi"]] = Field(default="hepsi", description="Index filter")
 
 # --- Utility Functions ---
 def truncate_text(text: str, word_limit: int) -> str:
@@ -752,21 +752,8 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     # --- Construct DergiPark Search URL ---
     base_url = "https://dergipark.org.tr/tr/search"; query_params = {}
 
-    # Handle backward compatibility: if pubyear is provided but publication_year is not, use pubyear for publication_year
-    if search_params.pubyear and not search_params.publication_year:
-        search_params.publication_year = search_params.pubyear
-
-    # If direct 'q' param provided, use it. Otherwise build from specific fields
-    if search_params.q:
-        query_params['q'] = search_params.q
-    else:
-        # Build search query from all provided fields (excluding q, pagination, etc)
-        search_q = " ".join(f"{f}:{v}" for f, v in search_params.model_dump(exclude={'q', 'dergipark_page', 'api_page', 'sort_by', 'article_type', 'index_filter', 'publication_year', 'pubyear'}, exclude_unset=True).items())
-        if search_q:
-            query_params['q'] = search_q
-        else:
-            # If no search params provided, search for everything
-            query_params['q'] = '*'
+    # Set search query (use 'q' if provided, otherwise search everything)
+    query_params['q'] = search_params.q if search_params.q else '*'
     query_params['section'] = 'article'
     if search_params.dergipark_page > 1: query_params['page'] = search_params.dergipark_page
     if search_params.article_type: query_params['filter[article_type][]'] = search_params.article_type
