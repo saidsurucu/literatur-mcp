@@ -287,6 +287,9 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
             # --- Extract Meta Details ---
             raw_details = {tag.get('name'): tag.get('content','').strip() for tag in meta_tags if tag.get('name')}
             pdf_url = raw_details.get('citation_pdf_url')
+            # Ensure PDF URL is absolute
+            if pdf_url and not pdf_url.startswith('http'):
+                pdf_url = f"https://dergipark.org.tr{pdf_url}" if pdf_url.startswith('/') else f"https://dergipark.org.tr/{pdf_url}"
             journal_url_base = raw_details.get('DC.Source.URI') # Needed for index URL
             # Populate details dictionary carefully
             details = {
