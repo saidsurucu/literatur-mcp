@@ -17,6 +17,7 @@ image = (
     modal.Image.from_registry("mcr.microsoft.com/playwright/python:v1.51.0-jammy", add_python="3.11")
     .pip_install_from_requirements("requirements.txt")
     .add_local_file("main.py", remote_path="/root/main.py", copy=True)
+    .add_local_dir("gizlilik", remote_path="/root/gizlilik")
 )
 
 # Mount volume at /data for cookie persistence
