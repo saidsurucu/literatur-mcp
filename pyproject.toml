@@ -33,3 +33,6 @@ dependencies = [
 
 [project.scripts]
 literatur-mcp = "mcp_server:main"
+
+[tool.setuptools]
+py-modules = ["mcp_server", "core"]
