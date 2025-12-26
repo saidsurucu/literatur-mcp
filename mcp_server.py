@@ -144,12 +144,10 @@ async def pdf_to_html(
 
 # --- Entry Point ---
 
-if __name__ == "__main__":
-    print("--- DergiPark MCP Server ---")
-    print("Search and analyze Turkish academic journal articles")
-    print("")
-    print("Tools:")
-    print("  - search_articles: Search articles with filters")
-    print("  - pdf_to_html: Convert PDF to readable HTML")
-    print("")
+def main():
+    """Entry point for the MCP server."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -60,11 +60,10 @@ Claude Desktop yapılandırma dosyanıza ekleyin:
 {
   "mcpServers": {
     "DergiPark MCP": {
-      "command": "uv",
+      "command": "uvx",
       "args": [
-        "run", "--with", "fastmcp",
-        "--with-editable", "/path/to/dergipark-api",
-        "fastmcp", "run", "/path/to/dergipark-api/mcp_server.py"
+        "--from", "git+https://github.com/saidsurucu/literatur-mcp",
+        "literatur-mcp"
       ],
       "env": {
         "HEADLESS_MODE": "true",

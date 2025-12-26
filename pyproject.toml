@@ -1,7 +1,7 @@
 [project]
-name = "dergipark-api"
+name = "literatur-mcp"
 version = "1.0.0"
-description = "DergiPark akademik makale arama API ve MCP sunucusu"
+description = "DergiPark MCP Server - Search and analyze Turkish academic journal articles"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -30,3 +30,6 @@ dependencies = [
     "modal>=1.1.4",
     "mistralai>=1.9.11",
 ]
+
+[project.scripts]
+literatur-mcp = "mcp_server:main"
