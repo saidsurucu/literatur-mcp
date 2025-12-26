@@ -20,6 +20,7 @@ import httpx
 from bs4 import BeautifulSoup
 from cachetools import TTLCache
 from fastapi import FastAPI, Body, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 import fitz 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError, Page, BrowserContext
@@ -64,7 +65,7 @@ def load_cookies_from_disk():
         return None
 
 # CapSolver Ayarları
-CAPSOLVER_API_KEY = os.getenv("CAPSOLVER_API_KEY", "CAP-1E1D6F5F97285F22927DFC04FA04116A4A5FCC9211E28F36195D8372CC7D6739")
+CAPSOLVER_API_KEY = os.getenv("CAPSOLVER_API_KEY", "")
 CAPSOLVER_CREATE_TASK_URL = "https://api.capsolver.com/createTask"
 CAPSOLVER_GET_RESULT_URL = "https://api.capsolver.com/getTaskResult"
 
@@ -92,6 +93,15 @@ app = FastAPI(
     title="DergiPark Scraper API (Browser Pool + In-Memory Cache)",
     version="1.12.0", # Browser pooling için versiyon güncellendi
     description="API to search DergiPark articles with browser pooling for better performance and reduced CAPTCHA challenges.",
+)
+
+# --- CORS Middleware ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- API Key Check ---

@@ -1,0 +1,32 @@
+[project]
+name = "dergipark-api"
+version = "1.0.0"
+description = "DergiPark akademik makale arama API ve MCP sunucusu"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=2.14.1",
+    "aiofiles>=23.0.0",
+    "asyncio>=3.4.3",
+    "beautifulsoup4>=4.11.0",
+    "cachetools>=5.0.0",
+    "fastapi>=0.100.0",
+    "gunicorn>=20.0.0",
+    "html5lib>=1.1",
+    "httpx>=0.25.0",
+    "markitdown[pdf]>=0.1.1",
+    "playwright-recaptcha>=0.5.1",
+    "playwright==1.51.0",
+    "uvicorn[standard]>=0.23.0",
+    "anycaptcha>=1.5.4",
+    "selenium>=4.31.0",
+    "webdriver-manager>=4.0.2",
+    "capsolver>=1.0.7",
+    "redis>=5.2.1",
+    "pydantic>=2.11.2",
+    "pymupdf>=1.25.5",
+    "browser-use>=0.7.10",
+    "langchain-google-genai>=2.1.12",
+    "modal>=1.1.4",
+    "mistralai>=1.9.11",
+]

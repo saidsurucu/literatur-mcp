@@ -159,9 +159,18 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 .DS_Store
-*.lock
+uv.lock
 test.py
 .python-version
 *.png
-*.toml
 hello.py
+cookies_persistent.pkl
+debug_page.html
+CLAUDE.md
+
+# Ignore dot files/folders except necessary ones
+.*
+!.env.example
+!.gitignore
+!.gitattributes
+!.dockerignore
