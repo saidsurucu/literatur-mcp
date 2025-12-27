@@ -11,6 +11,7 @@ Usage:
     fastmcp run mcp_server.py     # Production mode
 """
 
+import sys
 from typing import Optional, Literal, Annotated
 from contextlib import asynccontextmanager
 from fastmcp import FastMCP, Context
@@ -27,15 +28,15 @@ from core import (
 @asynccontextmanager
 async def lifespan(server: FastMCP):
     """Manage browser pool lifecycle."""
-    print("=== MCP SERVER STARTUP ===")
+    print("=== MCP SERVER STARTUP ===", file=sys.stderr)
     await browser_pool_manager.initialize()
-    print("=== BROWSER POOL READY ===")
+    print("=== BROWSER POOL READY ===", file=sys.stderr)
     try:
         yield {}
     finally:
-        print("=== MCP SERVER SHUTDOWN ===")
+        print("=== MCP SERVER SHUTDOWN ===", file=sys.stderr)
         await browser_pool_manager.cleanup()
-        print("=== CLEANUP COMPLETE ===")
+        print("=== CLEANUP COMPLETE ===", file=sys.stderr)
 
 
 # --- FastMCP Server Initialization ---

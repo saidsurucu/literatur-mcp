@@ -13,6 +13,7 @@ import math
 import os
 import pickle
 import random
+import sys
 import tempfile
 import traceback
 import urllib.parse
@@ -70,9 +71,9 @@ def save_cookies_to_disk(cookies):
     try:
         with open(COOKIES_FILE_PATH, 'wb') as f:
             pickle.dump({'cookies': cookies, 'timestamp': time.time()}, f)
-        print(f"Cookies saved to disk: {COOKIES_FILE_PATH}")
+        print(f"Cookies saved to disk: {COOKIES_FILE_PATH}", file=sys.stderr)
     except Exception as e:
-        print(f"Failed to save cookies to disk: {e}")
+        print(f"Failed to save cookies to disk: {e}", file=sys.stderr)
 
 
 def load_cookies_from_disk():
@@ -84,13 +85,13 @@ def load_cookies_from_disk():
             data = pickle.load(f)
         age = time.time() - data['timestamp']
         if age > COOKIES_TTL:
-            print(f"Disk cookies expired (age: {age:.0f}s > {COOKIES_TTL}s)")
+            print(f"Disk cookies expired (age: {age:.0f}s > {COOKIES_TTL}s)", file=sys.stderr)
             os.remove(COOKIES_FILE_PATH)
             return None
-        print(f"Loaded {len(data['cookies'])} cookies from disk (age: {age:.0f}s)")
+        print(f"Loaded {len(data['cookies'])} cookies from disk (age: {age:.0f}s)", file=sys.stderr)
         return data['cookies']
     except Exception as e:
-        print(f"Failed to load cookies from disk: {e}")
+        print(f"Failed to load cookies from disk: {e}", file=sys.stderr)
         return None
 
 
@@ -114,7 +115,7 @@ def _extract_text_with_fitz_sync(pdf_path: str) -> str:
         doc.close()
         return extracted_text
     except Exception as e:
-        print(f"PyMuPDF (fitz) extraction failed in helper for '{pdf_path}': {e}")
+        print(f"PyMuPDF (fitz) extraction failed in helper for '{pdf_path}': {e}", file=sys.stderr)
         raise
 
 
@@ -126,7 +127,7 @@ async def _ocr_with_mistral(pdf_url: str) -> str:
     try:
         client = Mistral(api_key=MISTRAL_API_KEY)
 
-        print(f"Mistral OCR processing: {pdf_url}")
+        print(f"Mistral OCR processing: {pdf_url}", file=sys.stderr)
         ocr_response = await asyncio.to_thread(
             lambda: client.ocr.process(
                 model="mistral-ocr-latest",
@@ -147,12 +148,12 @@ async def _ocr_with_mistral(pdf_url: str) -> str:
                 elif hasattr(page, 'text') and page.text:
                     text_parts.append(page.text)
             result = "\n\n".join(text_parts)
-            print(f"Mistral OCR extracted {len(result)} characters")
+            print(f"Mistral OCR extracted {len(result)} characters", file=sys.stderr)
             return result
 
         return ""
     except Exception as e:
-        print(f"Mistral OCR failed: {e}")
+        print(f"Mistral OCR failed: {e}", file=sys.stderr)
         raise RuntimeError(f"Mistral OCR error: {e}")
 
 
@@ -171,7 +172,7 @@ async def fetch_indices_async(journal_url_base: str) -> str:
             ]
             return ', '.join(indices_list)
     except Exception as e:
-        print(f"Async index fetch failed for {journal_url_base}: {e}")
+        print(f"Async index fetch failed for {journal_url_base}: {e}", file=sys.stderr)
         return ''
 
 
@@ -189,17 +190,17 @@ class BrowserPool:
     async def initialize(self):
         """Initialize browser pool on startup."""
         try:
-            print(f"Initializing browser pool with {self.pool_size} browsers...")
+            print(f"Initializing browser pool with {self.pool_size} browsers...", file=sys.stderr)
             self.playwright_instance = await async_playwright().start()
 
             for i in range(self.pool_size):
                 browser = await self.create_browser()
                 self.browsers.append(browser)
-                print(f"Browser {i+1}/{self.pool_size} created")
+                print(f"Browser {i+1}/{self.pool_size} created", file=sys.stderr)
 
-            print("Browser pool initialization complete!")
+            print("Browser pool initialization complete!", file=sys.stderr)
         except Exception as e:
-            print(f"Failed to initialize browser pool: {e}")
+            print(f"Failed to initialize browser pool: {e}", file=sys.stderr)
             raise
 
     async def create_browser(self):
@@ -231,7 +232,7 @@ class BrowserPool:
                         break
 
             if not browser:
-                print("No healthy browser found, creating new one...")
+                print("No healthy browser found, creating new one...", file=sys.stderr)
                 browser = await self.create_browser()
                 self.browsers[0] = browser
 
@@ -244,34 +245,34 @@ class BrowserPool:
             )
             page = await context.new_page()
 
-            print(f"Using browser from pool (authenticated: {browser in self.authenticated_browsers})")
+            print(f"Using browser from pool (authenticated: {browser in self.authenticated_browsers})", file=sys.stderr)
             return browser, context, page
 
     async def mark_authenticated(self, browser):
         """Mark browser as CAPTCHA-solved."""
         async with self.lock:
             self.authenticated_browsers.add(browser)
-            print("Browser marked as authenticated")
+            print("Browser marked as authenticated", file=sys.stderr)
 
     async def cleanup(self):
         """Close all browsers in pool."""
-        print("Cleaning up browser pool...")
+        print("Cleaning up browser pool...", file=sys.stderr)
         async with self.lock:
             for browser in self.browsers:
                 try:
                     if browser.is_connected():
                         await browser.close()
                 except Exception as e:
-                    print(f"Error closing browser: {e}")
+                    print(f"Error closing browser: {e}", file=sys.stderr)
             self.browsers.clear()
             self.authenticated_browsers.clear()
 
         if self.playwright_instance:
             try:
                 await self.playwright_instance.stop()
-                print("Playwright instance stopped")
+                print("Playwright instance stopped", file=sys.stderr)
             except Exception as e:
-                print(f"Error stopping playwright: {e}")
+                print(f"Error stopping playwright: {e}", file=sys.stderr)
 
 
 # Global browser pool instance
@@ -287,7 +288,7 @@ async def close_context_and_page(context, page):
             await context.close()
     except Exception as e:
         if "closed" not in str(e).lower():
-            print(f"Warning: Error closing context/page: {e}")
+            print(f"Warning: Error closing context/page: {e}", file=sys.stderr)
 
 
 async def fetch_article_details_parallel(
@@ -316,7 +317,7 @@ async def fetch_article_details_parallel(
             browser = context = page = None
             try:
                 browser, context, page = await browser_pool_manager.get_browser_and_context()
-                print(f"  Paralel fetch: {link_info['url'][:60]}...")
+                print(f"  Paralel fetch: {link_info['url'][:60]}...", file=sys.stderr)
 
                 # Makale detaylarını çek
                 await page.set_extra_http_headers({'Referer': referer_url})
@@ -370,7 +371,7 @@ async def fetch_article_details_parallel(
                 }
 
             except Exception as e:
-                print(f"  Paralel fetch error: {link_info['url'][:40]}... - {e}")
+                print(f"  Paralel fetch error: {link_info['url'][:40]}... - {e}", file=sys.stderr)
                 return {
                     'title': link_info['title'],
                     'url': link_info['url'],
@@ -390,7 +391,7 @@ async def fetch_article_details_parallel(
     # Sonuçları işle ve filtrele
     for result in all_results:
         if isinstance(result, Exception):
-            print(f"  Gather exception: {result}")
+            print(f"  Gather exception: {result}", file=sys.stderr)
             continue
 
         # Index filtresi uygula
@@ -402,7 +403,7 @@ async def fetch_article_details_parallel(
         if passes:
             results.append(result)
         else:
-            print(f"  Filtered out by index_filter: {result.get('url', '')[:50]}")
+            print(f"  Filtered out by index_filter: {result.get('url', '')[:50]}", file=sys.stderr)
 
     return results
 
@@ -418,16 +419,16 @@ async def _inject_and_submit_captcha(page: Page, token: str, verification_submit
         js_func = """(t)=>{let e=document.getElementById('g-recaptcha-response');if(e){console.log('Injecting token...');e.value=t;e.dispatchEvent(new Event('input',{bubbles:!0}));e.dispatchEvent(new Event('change',{bubbles:!0}));console.log('Injected/dispatched.');return!0}return console.error('#g-recaptcha-response missing!'),!1}"""
 
     try:
-        print(f"Injecting {captcha_type} token via JS: {token[:15]}...")
+        print(f"Injecting {captcha_type} token via JS: {token[:15]}...", file=sys.stderr)
         injection_success = await page.evaluate(js_func, token)
         if not injection_success:
-            print(f"Error: Injection JS failed, target '{injection_target_selector}' not found?.")
+            print(f"Error: Injection JS failed, target '{injection_target_selector}' not found?.", file=sys.stderr)
             return False
 
-        print("Token injection script executed successfully.")
+        print("Token injection script executed successfully.", file=sys.stderr)
 
         if captcha_type == "turnstile":
-            print("Waiting for Turnstile to process token...")
+            print("Waiting for Turnstile to process token...", file=sys.stderr)
             await asyncio.sleep(random.uniform(2.0, 3.5))
             try:
                 await page.evaluate("""
@@ -441,14 +442,14 @@ async def _inject_and_submit_captcha(page: Page, token: str, verification_submit
                         return false;
                     }
                 """)
-                print("Attempted to unhide submit button.")
+                print("Attempted to unhide submit button.", file=sys.stderr)
             except Exception as e:
-                print(f"Could not unhide button via JS: {e}")
+                print(f"Could not unhide button via JS: {e}", file=sys.stderr)
         else:
             await asyncio.sleep(random.uniform(0.5, 1.2))
 
         submit_button = page.locator(verification_submit_selector)
-        print(f"Looking for submit button ('{verification_submit_selector}')...")
+        print(f"Looking for submit button ('{verification_submit_selector}')...", file=sys.stderr)
         try:
             await submit_button.wait_for(state="attached", timeout=7000)
             await page.evaluate("""
@@ -463,81 +464,81 @@ async def _inject_and_submit_captcha(page: Page, token: str, verification_submit
             """)
             await asyncio.sleep(0.5)
             await submit_button.wait_for(state="visible", timeout=5000)
-            print("Clicking 'Devam Et' button...")
+            print("Clicking 'Devam Et' button...", file=sys.stderr)
             async with page.expect_navigation(wait_until='load', timeout=35000):
                 await submit_button.click()
-            print("Submit clicked, navigation finished ('load' event).")
+            print("Submit clicked, navigation finished ('load' event).", file=sys.stderr)
 
             current_url = page.url
-            print(f"URL after submit: {current_url}")
+            print(f"URL after submit: {current_url}", file=sys.stderr)
             if "verification" in current_url:
-                print("Submission failed: Still on verification page.")
+                print("Submission failed: Still on verification page.", file=sys.stderr)
                 return False
             else:
-                print("Submission seems successful: Navigated away from verification page.")
+                print("Submission seems successful: Navigated away from verification page.", file=sys.stderr)
                 return True
 
         except Exception as e_sub:
-            print(f"Error during submit/navigation: {e_sub}")
+            print(f"Error during submit/navigation: {e_sub}", file=sys.stderr)
             return False
 
     except Exception as e_js:
-        print(f"Error executing JS injection: {e_js}")
+        print(f"Error executing JS injection: {e_js}", file=sys.stderr)
         return False
 
 
 async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
     """Solves reCAPTCHA v2 by fetching a *new* token from CapSolver."""
-    print("CAPTCHA detected. Fetching NEW token from CapSolver...")
+    print("CAPTCHA detected. Fetching NEW token from CapSolver...", file=sys.stderr)
     site_key_element_selector = '.g-recaptcha[data-sitekey]'
     verification_submit_selector = 'form[name="search_verification"] button[type="submit"]:has-text("Devam Et")'
 
     if not CAPSOLVER_API_KEY:
-        print("Error: CAPSOLVER_API_KEY environment variable is not set.")
+        print("Error: CAPSOLVER_API_KEY environment variable is not set.", file=sys.stderr)
         return False
 
     try:
         # Fetch Site Key
         site_key = None
         page_url = page.url
-        print(f"Waiting for sitekey element on {page_url}...")
+        print(f"Waiting for sitekey element on {page_url}...", file=sys.stderr)
         try:
             site_key_element = await page.wait_for_selector(site_key_element_selector, state="attached", timeout=15000)
             site_key = await site_key_element.get_attribute('data-sitekey')
             if not site_key:
                 raise ValueError("Sitekey attribute empty.")
-            print("Sitekey element found.")
+            print("Sitekey element found.", file=sys.stderr)
         except (PlaywrightTimeoutError, ValueError, Exception) as e:
-            print(f"Error finding/getting sitekey: {e}")
-            print("Trying fallback: extracting sitekey from page source...")
+            print(f"Error finding/getting sitekey: {e}", file=sys.stderr)
+            print("Trying fallback: extracting sitekey from page source...", file=sys.stderr)
             page_content = await page.content()
             sitekey_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', page_content)
             if sitekey_match:
                 site_key = sitekey_match.group(1)
-                print(f"Sitekey found via regex: {site_key}")
+                print(f"Sitekey found via regex: {site_key}", file=sys.stderr)
             else:
-                print("Fallback failed: No sitekey found in page source.")
+                print("Fallback failed: No sitekey found in page source.", file=sys.stderr)
                 return False
 
-        print(f"Sitekey: {site_key}, URL: {page_url}")
+        print(f"Sitekey: {site_key}, URL: {page_url}", file=sys.stderr)
 
         # Determine CAPTCHA Type
         if site_key.startswith("0x4"):
             task_type = "AntiTurnstileTaskProxyLess"
             captcha_type = "turnstile"
             injection_target_selector = '[name="cf-turnstile-response"]'
-            print("Detected Cloudflare Turnstile CAPTCHA")
+            print("Detected Cloudflare Turnstile CAPTCHA", file=sys.stderr)
         else:
             task_type = "ReCaptchaV2TaskProxyless"
             captcha_type = "recaptcha"
             injection_target_selector = '#g-recaptcha-response'
-            print("Detected reCAPTCHA v2")
+            print("Detected reCAPTCHA v2", file=sys.stderr)
 
         # Call CapSolver API
         task_payload = {"clientKey": CAPSOLVER_API_KEY, "task": {"type": task_type, "websiteURL": page_url, "websiteKey": site_key}}
         captcha_token = None
         async with httpx.AsyncClient(timeout=20.0) as client:
-            print("Sending task to CapSolver...")
+            print("Sending task to CapSolver...", file=sys.stderr)
             task_id = None
             try:
                 create_response = await client.post(CAPSOLVER_CREATE_TASK_URL, json=task_payload)
@@ -548,9 +549,9 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
                 task_id = create_result.get("taskId")
                 if not task_id:
                     raise ValueError("No Task ID received.")
-                print(f"CapSolver Task created: {task_id}")
+                print(f"CapSolver Task created: {task_id}", file=sys.stderr)
             except Exception as e:
-                print(f"Error Creating CapSolver Task: {e}")
+                print(f"Error Creating CapSolver Task: {e}", file=sys.stderr)
                 return False
 
             # Poll for Result
@@ -558,7 +559,7 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
             timeout_seconds = 180
             while time.time() - start_time < timeout_seconds:
                 await asyncio.sleep(6)
-                print(f"Polling CapSolver (ID: {task_id})...")
+                print(f"Polling CapSolver (ID: {task_id})...", file=sys.stderr)
                 result_payload = {"clientKey": CAPSOLVER_API_KEY, "taskId": task_id}
                 try:
                     get_response = await client.post(CAPSOLVER_GET_RESULT_URL, json=result_payload, timeout=15)
@@ -567,51 +568,51 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
                     if get_result.get("errorId", 0) != 0:
                         raise ValueError(f"API Error Poll: {get_result}")
                     status = get_result.get("status")
-                    print(f"Task status: {status}")
+                    print(f"Task status: {status}", file=sys.stderr)
                     if status == "ready":
                         solution = get_result.get("solution")
                         if solution:
                             captcha_token = solution.get("token") or solution.get("gRecaptchaResponse")
                         if captcha_token:
-                            print("CapSolver solution received!")
+                            print("CapSolver solution received!", file=sys.stderr)
                             break
                         else:
                             raise ValueError("Task ready but no token.")
                     elif status in ["failed", "error"]:
                         raise ValueError(f"CapSolver task failed/errored: {get_result.get('errorDescription', 'N/A')}")
                 except Exception as e:
-                    print(f"Warning: Error Polling CapSolver Task (will retry): {e}")
+                    print(f"Warning: Error Polling CapSolver Task (will retry): {e}", file=sys.stderr)
                     await asyncio.sleep(5)
 
             if not captcha_token:
-                print("Polling timeout or final error getting token.")
+                print("Polling timeout or final error getting token.", file=sys.stderr)
                 return False
 
         # Submit with the new token
-        print("New token received. Attempting submission...")
+        print("New token received. Attempting submission...", file=sys.stderr)
         try:
-            print(f"Waiting for injection target ('{injection_target_selector}')...")
+            print(f"Waiting for injection target ('{injection_target_selector}')...", file=sys.stderr)
             await page.wait_for_selector(injection_target_selector, state="attached", timeout=10000)
-            print("Injection target found.")
+            print("Injection target found.", file=sys.stderr)
         except PlaywrightTimeoutError:
-            print("Timeout waiting for injection target before submission.")
+            print("Timeout waiting for injection target before submission.", file=sys.stderr)
             return False
 
         submission_successful = await _inject_and_submit_captcha(page, captcha_token, verification_submit_selector, captcha_type)
 
         if not submission_successful:
-            print("Submission failed with the new token from CapSolver.")
+            print("Submission failed with the new token from CapSolver.", file=sys.stderr)
         return submission_successful
 
     except Exception as e:
-        print(f"Unexpected error during CAPTCHA solving process: {e}")
+        print(f"Unexpected error during CAPTCHA solving process: {e}", file=sys.stderr)
         return False
 
 
 # --- Article Details Fetching ---
 async def get_article_details_pw(page: Page, article_url: str, referer_url: Optional[str] = None) -> dict:
     """Fetches metadata and index info for a single article URL with retries."""
-    print(f"Fetching details: {article_url}")
+    print(f"Fetching details: {article_url}", file=sys.stderr)
     details = {'error': None}
     pdf_url = None
     indices = ''
@@ -620,20 +621,20 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
 
     while retries <= max_retries:
         try:
-            print(f"Attempt {retries + 1} for {article_url}")
+            print(f"Attempt {retries + 1} for {article_url}", file=sys.stderr)
             await page.set_extra_http_headers({'Referer': referer_url or page.url})
             await page.goto(article_url, wait_until='domcontentloaded', timeout=30000)
             html_content = await page.content()
 
             if any(s in html_content.lower() for s in ["cloudflare", "captcha", "blocked", "erişim engellendi"]):
-                print(f"Blocking pattern detected on details page: {article_url}")
+                print(f"Blocking pattern detected on details page: {article_url}", file=sys.stderr)
                 details['error'] = "Blocked"
                 break
 
             soup = BeautifulSoup(html_content, 'html5lib')
             meta_tags = soup.find_all('meta')
             if not meta_tags:
-                print(f"No meta tags found (Attempt {retries + 1}).")
+                print(f"No meta tags found (Attempt {retries + 1}).", file=sys.stderr)
                 if retries < max_retries:
                     await asyncio.sleep(1.5 * (retries + 1))
                     retries += 1
@@ -660,30 +661,30 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
             if journal_url_base:
                 try:
                     index_url = f"{journal_url_base.rstrip('/')}/indexes"
-                    print(f"Fetching indexes from: {index_url}")
+                    print(f"Fetching indexes from: {index_url}", file=sys.stderr)
                     await page.goto(index_url, wait_until='domcontentloaded', timeout=12000)
                     index_soup = BeautifulSoup(await page.content(), 'html5lib')
                     indices_list = [
                         i.text.strip() for i in index_soup.select('h5.j-index-listing-index-title') if i.text
                     ]
                     indices = ', '.join(indices_list)
-                    print(f"Found indexes: {indices or 'None'}")
+                    print(f"Found indexes: {indices or 'None'}", file=sys.stderr)
                 except Exception as e_idx:
-                    print(f"Warning: Index page error/timeout for {journal_url_base}: {e_idx}")
+                    print(f"Warning: Index page error/timeout for {journal_url_base}: {e_idx}", file=sys.stderr)
                 finally:
                     try:
                         if page.url != article_url:
-                            print("Navigating back to article page after index check...")
+                            print("Navigating back to article page after index check...", file=sys.stderr)
                             await page.goto(article_url, wait_until='domcontentloaded', timeout=10000)
                     except Exception as e_back:
-                        print(f"Warning: Failed to navigate back to article page: {e_back}")
+                        print(f"Warning: Failed to navigate back to article page: {e_back}", file=sys.stderr)
 
             details['error'] = None
-            print(f"Successfully fetched details for {article_url}")
+            print(f"Successfully fetched details for {article_url}", file=sys.stderr)
             break
 
         except PlaywrightTimeoutError:
-            print(f"Timeout fetching details (Attempt {retries + 1})")
+            print(f"Timeout fetching details (Attempt {retries + 1})", file=sys.stderr)
             if retries < max_retries:
                 await asyncio.sleep(2 * (retries + 1))
                 retries += 1
@@ -693,7 +694,7 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
                 break
 
         except Exception as e:
-            print(f"Error fetching details (Attempt {retries + 1}): {e}")
+            print(f"Error fetching details (Attempt {retries + 1}): {e}", file=sys.stderr)
             if retries < max_retries:
                 await asyncio.sleep(2 * (retries + 1))
                 retries += 1
@@ -714,75 +715,75 @@ async def get_article_links_with_cache(
     try:
         cached_data = links_cache.get(cache_key)
         if cached_data is not None:
-            print(f"Cache HIT: Links {str(cache_key)[:100]}...")
+            print(f"Cache HIT: Links {str(cache_key)[:100]}...", file=sys.stderr)
             return cached_data
     except Exception as e:
-        print(f"Warning: Links cache GET error for key {str(cache_key)[:100]}...: {e}")
+        print(f"Warning: Links cache GET error for key {str(cache_key)[:100]}...: {e}", file=sys.stderr)
 
-    print(f"Cache MISS: Links {str(cache_key)[:100]}... Fetching from DergiPark...")
+    print(f"Cache MISS: Links {str(cache_key)[:100]}... Fetching from DergiPark...", file=sys.stderr)
     article_links = []
     article_card_selector = 'div.card.article-card.dp-card-outline'
     captcha_was_solved = False
 
     try:
-        print(f"Navigating to: {search_url}")
+        print(f"Navigating to: {search_url}", file=sys.stderr)
         await page.goto(search_url, wait_until='load', timeout=40000)
-        print(f"Nav complete. URL: {page.url}")
+        print(f"Nav complete. URL: {page.url}", file=sys.stderr)
 
         if "/search/verification" in page.url or "verification" in page.url:
-            print("CAPTCHA page detected.")
+            print("CAPTCHA page detected.", file=sys.stderr)
             captcha_passed = await solve_recaptcha_v2_capsolver_direct_async(page)
             if not captcha_passed:
                 raise RuntimeError("CAPTCHA solving failed.")
-            print("CAPTCHA passed. Waiting for results page to load...")
+            print("CAPTCHA passed. Waiting for results page to load...", file=sys.stderr)
             captcha_was_solved = True
             try:
                 await page.wait_for_load_state("domcontentloaded", timeout=10000)
                 await page.wait_for_load_state("networkidle", timeout=20000)
-                print("Results page loaded after CAPTCHA.")
+                print("Results page loaded after CAPTCHA.", file=sys.stderr)
             except Exception as e:
-                print(f"Load state wait warning: {e}")
+                print(f"Load state wait warning: {e}", file=sys.stderr)
         else:
-            print("No CAPTCHA detected.")
+            print("No CAPTCHA detected.", file=sys.stderr)
 
         current_url = page.url
         if "section=article" not in current_url:
             try:
-                print("Not on article section yet, looking for article section link to click...")
+                print("Not on article section yet, looking for article section link to click...", file=sys.stderr)
                 article_section_link = await page.query_selector('a.search-section-link[href*="section=article"]')
                 if article_section_link:
-                    print("Clicking on article section...")
+                    print("Clicking on article section...", file=sys.stderr)
                     await article_section_link.click()
                     await page.wait_for_load_state("networkidle", timeout=20000)
-                    print("Article section loaded.")
+                    print("Article section loaded.", file=sys.stderr)
                 else:
-                    print("Article section link not found.")
+                    print("Article section link not found.", file=sys.stderr)
             except Exception as e:
-                print(f"Warning: Could not click article section: {e}")
+                print(f"Warning: Could not click article section: {e}", file=sys.stderr)
         else:
-            print("Already on article section (URL contains section=article), skipping click to preserve filters.")
+            print("Already on article section (URL contains section=article), skipping click to preserve filters.", file=sys.stderr)
 
-        print("Waiting for client-side JavaScript filtering...")
+        print("Waiting for client-side JavaScript filtering...", file=sys.stderr)
         await asyncio.sleep(3)
         await page.wait_for_load_state("networkidle", timeout=10000)
-        print("JavaScript filtering should be complete.")
+        print("JavaScript filtering should be complete.", file=sys.stderr)
 
         try:
-            print(f"Waiting for article cards with selector: {article_card_selector}")
+            print(f"Waiting for article cards with selector: {article_card_selector}", file=sys.stderr)
             await page.wait_for_selector(article_card_selector, state="attached", timeout=15000)
             article_cards = await page.query_selector_all(article_card_selector)
-            print(f"{len(article_cards)} article cards found.")
+            print(f"{len(article_cards)} article cards found.", file=sys.stderr)
         except PlaywrightTimeoutError:
             page_content = await page.content()
             if "sonuç bulunamadı" in page_content.lower():
-                print("No results message detected.")
+                print("No results message detected.", file=sys.stderr)
                 article_links = []
             else:
-                print("DEBUG: Searching for alternative selectors...")
+                print("DEBUG: Searching for alternative selectors...", file=sys.stderr)
                 alt_cards = await page.query_selector_all("div.card")
-                print(f"DEBUG: Found {len(alt_cards)} elements with class 'card'")
+                print(f"DEBUG: Found {len(alt_cards)} elements with class 'card'", file=sys.stderr)
                 article_divs = await page.query_selector_all("div.article-card")
-                print(f"DEBUG: Found {len(article_divs)} elements with class 'article-card'")
+                print(f"DEBUG: Found {len(article_divs)} elements with class 'article-card'", file=sys.stderr)
                 raise RuntimeError("Link extraction failed (timeout finding cards).")
 
         if article_cards:
@@ -797,13 +798,13 @@ async def get_article_links_with_cache(
 
         try:
             links_cache[cache_key] = article_links
-            print(f"Stored {len(article_links)} links in link cache: {str(cache_key)[:100]}...")
+            print(f"Stored {len(article_links)} links in link cache: {str(cache_key)[:100]}...", file=sys.stderr)
         except Exception as e:
-            print(f"Warning: Links cache SET error for key {str(cache_key)[:100]}...: {e}")
+            print(f"Warning: Links cache SET error for key {str(cache_key)[:100]}...: {e}", file=sys.stderr)
 
         if captcha_was_solved:
             try:
-                print("Saving cookies post-CAPTCHA to in-memory cache...")
+                print("Saving cookies post-CAPTCHA to in-memory cache...", file=sys.stderr)
                 browser_context = page.context
                 current_cookies = await browser_context.cookies(urls=[page.url])
                 if current_cookies:
@@ -811,19 +812,19 @@ async def get_article_links_with_cache(
                         if 'expires' in c and isinstance(c['expires'], float):
                             c['expires'] = int(c['expires'])
                     cookie_cache[COOKIES_CACHE_KEY] = current_cookies
-                    print(f"Saved {len(current_cookies)} cookies to cache '{COOKIES_CACHE_KEY}' (TTL: {COOKIES_TTL}s).")
+                    print(f"Saved {len(current_cookies)} cookies to cache '{COOKIES_CACHE_KEY}' (TTL: {COOKIES_TTL}s).", file=sys.stderr)
                     save_cookies_to_disk(current_cookies)
                     browser = page.context.browser
                     await browser_pool_manager.mark_authenticated(browser)
                 else:
-                    print("No relevant cookies found to save.")
+                    print("No relevant cookies found to save.", file=sys.stderr)
             except Exception as e:
-                print(f"Warning: Failed to save cookies to cache: {e}")
+                print(f"Warning: Failed to save cookies to cache: {e}", file=sys.stderr)
 
         return article_links
 
     except Exception as e:
-        print(f"Error in get_article_links_with_cache: {e}\n{traceback.format_exc()}")
+        print(f"Error in get_article_links_with_cache: {e}\n{traceback.format_exc()}", file=sys.stderr)
         raise RuntimeError(f"Link fetching/processing failed: {e}")
 
 
@@ -836,19 +837,19 @@ async def pdf_to_html_core(pdf_url: str) -> str:
     # Check cache first
     cached_html = pdf_cache.get(pdf_url)
     if cached_html:
-        print(f"PDF cache hit: {pdf_url}")
+        print(f"PDF cache hit: {pdf_url}", file=sys.stderr)
         return cached_html
-    print(f"PDF cache miss: {pdf_url}")
+    print(f"PDF cache miss: {pdf_url}", file=sys.stderr)
 
     tmp_name = None
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=True) as client:
-            print(f"Downloading PDF from: {pdf_url}")
+            print(f"Downloading PDF from: {pdf_url}", file=sys.stderr)
             response = await client.get(pdf_url)
             response.raise_for_status()
             content_type = response.headers.get('content-type', '').lower()
             if 'application/pdf' not in content_type:
-                print(f"Warning: URL content type ('{content_type}') is not 'application/pdf'.")
+                print(f"Warning: URL content type ('{content_type}') is not 'application/pdf'.", file=sys.stderr)
             pdf_content = response.content
 
         if not pdf_content:
@@ -866,32 +867,32 @@ async def pdf_to_html_core(pdf_url: str) -> str:
         use_mistral_fallback = False
 
         try:
-            print(f"Converting PDF {tmp_name} to text using PyMuPDF (fitz)...")
+            print(f"Converting PDF {tmp_name} to text using PyMuPDF (fitz)...", file=sys.stderr)
             markdown_text = await asyncio.to_thread(_extract_text_with_fitz_sync, tmp_name)
-            print(f"PyMuPDF result length: {len(markdown_text)}")
+            print(f"PyMuPDF result length: {len(markdown_text)}", file=sys.stderr)
 
             # Check if PyMuPDF result is too short (likely scanned PDF)
             if not markdown_text or len(markdown_text.strip()) < 100:
-                print("PyMuPDF returned insufficient text, will try Mistral OCR...")
+                print("PyMuPDF returned insufficient text, will try Mistral OCR...", file=sys.stderr)
                 use_mistral_fallback = True
 
         except Exception as convert_err:
-            print(f"PyMuPDF (fitz) conversion failed: {convert_err}")
+            print(f"PyMuPDF (fitz) conversion failed: {convert_err}", file=sys.stderr)
             use_mistral_fallback = True
 
         # Fallback to Mistral OCR if PyMuPDF failed or returned too little
         if use_mistral_fallback and MISTRAL_API_KEY:
             try:
-                print("Attempting Mistral OCR fallback...")
+                print("Attempting Mistral OCR fallback...", file=sys.stderr)
                 markdown_text = await _ocr_with_mistral(pdf_url)
                 if not markdown_text:
                     markdown_text = "PDF icerigi okunamadi veya bos."
             except Exception as mistral_err:
-                print(f"Mistral OCR fallback also failed: {mistral_err}")
+                print(f"Mistral OCR fallback also failed: {mistral_err}", file=sys.stderr)
                 if not markdown_text:
                     markdown_text = "PDF icerigi okunamadi veya bos."
         elif use_mistral_fallback:
-            print("Mistral OCR not available (no API key), using PyMuPDF result")
+            print("Mistral OCR not available (no API key), using PyMuPDF result", file=sys.stderr)
             if not markdown_text:
                 markdown_text = "PDF icerigi okunamadi veya bos."
 
@@ -914,9 +915,9 @@ async def pdf_to_html_core(pdf_url: str) -> str:
         if tmp_name and os.path.exists(tmp_name):
             try:
                 os.remove(tmp_name)
-                print(f"Temporary PDF file deleted: {tmp_name}")
+                print(f"Temporary PDF file deleted: {tmp_name}", file=sys.stderr)
             except OSError as e_remove:
-                print(f"Error removing temporary file {tmp_name}: {e_remove}")
+                print(f"Error removing temporary file {tmp_name}: {e_remove}", file=sys.stderr)
 
 
 # --- Core Search Function ---
@@ -951,7 +952,7 @@ async def search_articles_core(
 
     target_search_url = f"{base_url}?{urllib.parse.urlencode(query_params, quote_via=urllib.parse.quote)}"
     page_size = 5
-    print(f"Target DP URL: {target_search_url} | API Page: {api_page} | Size: {page_size}")
+    print(f"Target DP URL: {target_search_url} | API Page: {api_page} | Size: {page_size}", file=sys.stderr)
 
     browser = context = page = None
     total_items_on_page = 0
@@ -962,11 +963,11 @@ async def search_articles_core(
 
         # Attempt to Inject Cookies from Cache
         try:
-            print(f"Checking in-memory cache for cookies: {COOKIES_CACHE_KEY}")
+            print(f"Checking in-memory cache for cookies: {COOKIES_CACHE_KEY}", file=sys.stderr)
             saved_cookies = cookie_cache.get(COOKIES_CACHE_KEY)
 
             if not saved_cookies:
-                print("Memory cache miss, checking disk...")
+                print("Memory cache miss, checking disk...", file=sys.stderr)
                 saved_cookies = load_cookies_from_disk()
                 if saved_cookies:
                     cookie_cache[COOKIES_CACHE_KEY] = saved_cookies
@@ -982,15 +983,15 @@ async def search_articles_core(
                             del c['sameSite']
                         valid_cookies.append(c)
                 if valid_cookies:
-                    print(f"Injecting {len(valid_cookies)} cookies from cache...")
+                    print(f"Injecting {len(valid_cookies)} cookies from cache...", file=sys.stderr)
                     await context.add_cookies(valid_cookies)
-                    print("Cookies injected.")
+                    print("Cookies injected.", file=sys.stderr)
                 else:
-                    print("No valid cookies found in cache.")
+                    print("No valid cookies found in cache.", file=sys.stderr)
             else:
-                print("No saved cookies found in cache.")
+                print("No saved cookies found in cache.", file=sys.stderr)
         except Exception as e:
-            print(f"Warning: Cookie load/injection error from cache: {e}")
+            print(f"Warning: Cookie load/injection error from cache: {e}", file=sys.stderr)
 
         # Generate cache key
         cache_key_data = {
@@ -1023,14 +1024,14 @@ async def search_articles_core(
         offset = (api_page - 1) * page_size
         limit = page_size
         links_to_process = full_link_list[offset:offset + limit]
-        print(f"Links: Total={total_items_on_page}, Slice={len(links_to_process)} (API Page {api_page}/{total_api_pages})")
+        print(f"Links: Total={total_items_on_page}, Slice={len(links_to_process)} (API Page {api_page}/{total_api_pages})", file=sys.stderr)
 
         if not links_to_process:
             return {"pagination": pagination_info, "articles": []}
 
         # Paralel Fetch - Performans iyileştirmesi
         referer_url = page.url
-        print(f"Paralel fetch başlıyor: {len(links_to_process)} makale (max_concurrent=3)...")
+        print(f"Paralel fetch başlıyor: {len(links_to_process)} makale (max_concurrent=3)...", file=sys.stderr)
 
         articles_details = await fetch_article_details_parallel(
             links_to_process=links_to_process,
@@ -1039,11 +1040,11 @@ async def search_articles_core(
             max_concurrent=3
         )
 
-        print(f"Paralel fetch tamamlandı: {len(articles_details)} makale döndü")
+        print(f"Paralel fetch tamamlandı: {len(articles_details)} makale döndü", file=sys.stderr)
         return {"pagination": pagination_info, "articles": articles_details}
 
     except Exception as e:
-        print(f"General search error: {e}\n{traceback.format_exc()}")
+        print(f"General search error: {e}\n{traceback.format_exc()}", file=sys.stderr)
         raise RuntimeError(f"Unexpected search error: {e}")
     finally:
         if context or page:
@@ -1085,7 +1086,7 @@ async def get_article_details_core(article_url: str) -> dict:
         }
 
     except Exception as e:
-        print(f"Error fetching article details: {e}")
+        print(f"Error fetching article details: {e}", file=sys.stderr)
         raise RuntimeError(f"Failed to fetch article details: {e}")
     finally:
         if context or page:
