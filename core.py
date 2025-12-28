@@ -341,6 +341,22 @@ async def fetch_article_details_parallel(
                 pdf_url = raw_details.get('citation_pdf_url')
                 journal_url_base = raw_details.get('DC.Source.URI')
 
+                # İstatistikler
+                citation_count = raw_details.get('stats_trdizin_citation_count', '0')
+                reference_tags = [tag for tag in meta_tags if tag.get('name') == 'citation_reference']
+                reference_count = len(reference_tags)
+                references = [tag.get('content', '').strip() for tag in reference_tags if tag.get('content')]
+
+                # Görüntülenme ve indirme sayısı (HTML elementlerinden)
+                view_count = '0'
+                download_count = '0'
+                view_el = soup.select_one('#j-stat-article-view')
+                if view_el:
+                    view_count = view_el.get_text(strip=True)
+                download_el = soup.select_one('#j-stat-article-download')
+                if download_el:
+                    download_count = download_el.get_text(strip=True)
+
                 details = {
                     'citation_title': raw_details.get('citation_title'),
                     'citation_author': raw_details.get('DC.Creator.PersonalName'),
@@ -349,7 +365,12 @@ async def fetch_article_details_parallel(
                     'citation_keywords': raw_details.get('citation_keywords'),
                     'citation_doi': raw_details.get('citation_doi'),
                     'citation_issn': raw_details.get('citation_issn'),
-                    'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100)
+                    'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100),
+                    'stats_citation_count': citation_count,
+                    'stats_view_count': view_count,
+                    'stats_download_count': download_count,
+                    'stats_reference_count': reference_count,
+                    'references': references
                 }
 
                 # Async index fetch (Playwright navigasyon yerine HTTP)

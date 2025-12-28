@@ -298,6 +298,23 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
             raw_details = {tag.get('name'): tag.get('content','').strip() for tag in meta_tags if tag.get('name')}
             pdf_url = raw_details.get('citation_pdf_url')  # This is usually a relative path like "/tr/download/article-file/123"
             journal_url_base = raw_details.get('DC.Source.URI') # Needed for index URL
+
+            # İstatistikler
+            citation_count = raw_details.get('stats_trdizin_citation_count', '0')
+            reference_tags = [tag for tag in meta_tags if tag.get('name') == 'citation_reference']
+            reference_count = len(reference_tags)
+            references = [tag.get('content', '').strip() for tag in reference_tags if tag.get('content')]
+
+            # Görüntülenme ve indirme sayısı (HTML elementlerinden)
+            view_count = '0'
+            download_count = '0'
+            view_el = detail_soup.select_one('#j-stat-article-view')
+            if view_el:
+                view_count = view_el.get_text(strip=True)
+            download_el = detail_soup.select_one('#j-stat-article-download')
+            if download_el:
+                download_count = download_el.get_text(strip=True)
+
             # Populate details dictionary carefully
             details = {
                 'citation_title': raw_details.get('citation_title'),
@@ -307,7 +324,12 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
                 'citation_keywords': raw_details.get('citation_keywords'),
                 'citation_doi': raw_details.get('citation_doi'),
                 'citation_issn': raw_details.get('citation_issn'),
-                'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100)
+                'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100),
+                'stats_citation_count': citation_count,
+                'stats_view_count': view_count,
+                'stats_download_count': download_count,
+                'stats_reference_count': reference_count,
+                'references': references
             }
 
             # --- Fetch Indexes (Optional) ---
