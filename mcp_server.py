@@ -20,6 +20,7 @@ from pydantic import Field
 from core import (
     search_articles_core,
     pdf_to_html_core,
+    get_article_references_core,
     browser_pool_manager,
 )
 
@@ -141,6 +142,36 @@ async def pdf_to_html(
         if ctx:
             await ctx.error(error_msg)
         return f"<html><body><h1>Error</h1><p>{error_msg}</p></body></html>"
+
+
+@mcp.tool
+async def get_article_references(
+    article_url: Annotated[str, Field(description="DergiPark article URL (e.g., 'https://dergipark.org.tr/en/pub/eskiyeni/article/434507')")],
+    ctx: Context = None,
+) -> dict:
+    """
+    Get references list for a DergiPark article.
+
+    Returns the full list of references cited in the article.
+    Use this after search_articles to get detailed reference information.
+    """
+    if ctx:
+        await ctx.info(f"Fetching references: {article_url[:50]}...")
+
+    try:
+        result = await get_article_references_core(article_url)
+
+        if ctx:
+            count = result.get('reference_count', 0)
+            await ctx.info(f"Found {count} references")
+
+        return result
+
+    except Exception as e:
+        error_msg = f"References fetch error: {str(e)}"
+        if ctx:
+            await ctx.error(error_msg)
+        return {"error": error_msg, "references": []}
 
 
 # --- Entry Point ---

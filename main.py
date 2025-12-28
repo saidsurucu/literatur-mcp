@@ -303,7 +303,6 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
             citation_count = raw_details.get('stats_trdizin_citation_count', '0')
             reference_tags = [tag for tag in meta_tags if tag.get('name') == 'citation_reference']
             reference_count = len(reference_tags)
-            references = [tag.get('content', '').strip() for tag in reference_tags if tag.get('content')]
 
             # Populate details dictionary carefully
             details = {
@@ -317,7 +316,6 @@ async def get_article_details_pw(page: Page, article_url: str, referer_url: Opti
                 'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100),
                 'stats_citation_count': citation_count,
                 'stats_reference_count': reference_count,
-                'references': references
             }
 
             # --- Fetch Indexes (Optional) ---

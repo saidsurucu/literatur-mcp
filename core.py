@@ -347,7 +347,6 @@ async def fetch_article_details_parallel(
                 citation_count = raw_details.get('stats_trdizin_citation_count', '0')
                 reference_tags = [tag for tag in meta_tags if tag.get('name') == 'citation_reference']
                 reference_count = len(reference_tags)
-                references = [tag.get('content', '').strip() for tag in reference_tags if tag.get('content')]
 
                 details = {
                     'citation_title': raw_details.get('citation_title'),
@@ -360,7 +359,6 @@ async def fetch_article_details_parallel(
                     'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100),
                     'stats_citation_count': citation_count,
                     'stats_reference_count': reference_count,
-                    'references': references
                 }
 
                 # Async index fetch
@@ -420,6 +418,59 @@ async def fetch_article_details_parallel(
             print(f"  Filtered out by index_filter: {result.get('url', '')[:50]}", file=sys.stderr)
 
     return results
+
+
+async def get_article_references_core(article_url: str) -> dict:
+    """
+    Makale URL'inden referans listesini çeker.
+
+    Args:
+        article_url: DergiPark makale URL'i
+
+    Returns:
+        Referans bilgilerini içeren dict
+    """
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
+    }
+
+    try:
+        async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
+            response = await client.get(article_url, timeout=30.0)
+            response.raise_for_status()
+            html_content = response.text
+
+        soup = BeautifulSoup(html_content, 'html5lib')
+        meta_tags = soup.find_all('meta')
+
+        # Referansları çek
+        reference_tags = [tag for tag in meta_tags if tag.get('name') == 'citation_reference']
+        references = [tag.get('content', '').strip() for tag in reference_tags if tag.get('content')]
+
+        # Makale başlığını da al
+        title = None
+        for tag in meta_tags:
+            if tag.get('name') == 'citation_title':
+                title = tag.get('content', '').strip()
+                break
+
+        return {
+            'article_url': article_url,
+            'title': title,
+            'reference_count': len(references),
+            'references': references
+        }
+
+    except Exception as e:
+        print(f"get_article_references_core error: {e}", file=sys.stderr)
+        return {
+            'article_url': article_url,
+            'error': str(e),
+            'reference_count': 0,
+            'references': []
+        }
 
 
 # --- CAPTCHA Handling ---
