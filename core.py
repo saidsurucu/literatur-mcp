@@ -312,17 +312,19 @@ async def fetch_article_details_parallel(
     semaphore = asyncio.Semaphore(max_concurrent)
     results = []
 
-    async def fetch_single(link_info: dict) -> dict:
+    async def fetch_single(link_info: dict, client: httpx.AsyncClient) -> dict:
         async with semaphore:
-            browser = context = page = None
             try:
-                browser, context, page = await browser_pool_manager.get_browser_and_context()
-                print(f"  Paralel fetch: {link_info['url'][:60]}...", file=sys.stderr)
+                print(f"  httpx fetch: {link_info['url'][:60]}...", file=sys.stderr)
 
-                # Makale detaylarını çek
-                await page.set_extra_http_headers({'Referer': referer_url})
-                await page.goto(link_info['url'], wait_until='domcontentloaded', timeout=30000)
-                html_content = await page.content()
+                # Makale detaylarını httpx ile çek
+                response = await client.get(
+                    link_info['url'],
+                    headers={'Referer': referer_url},
+                    timeout=30.0
+                )
+                response.raise_for_status()
+                html_content = response.text
 
                 if any(s in html_content.lower() for s in ["cloudflare", "captcha", "blocked"]):
                     return {
@@ -347,16 +349,6 @@ async def fetch_article_details_parallel(
                 reference_count = len(reference_tags)
                 references = [tag.get('content', '').strip() for tag in reference_tags if tag.get('content')]
 
-                # Görüntülenme ve indirme sayısı (HTML elementlerinden)
-                view_count = '0'
-                download_count = '0'
-                view_el = soup.select_one('#j-stat-article-view')
-                if view_el:
-                    view_count = view_el.get_text(strip=True)
-                download_el = soup.select_one('#j-stat-article-download')
-                if download_el:
-                    download_count = download_el.get_text(strip=True)
-
                 details = {
                     'citation_title': raw_details.get('citation_title'),
                     'citation_author': raw_details.get('DC.Creator.PersonalName'),
@@ -367,13 +359,11 @@ async def fetch_article_details_parallel(
                     'citation_issn': raw_details.get('citation_issn'),
                     'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100),
                     'stats_citation_count': citation_count,
-                    'stats_view_count': view_count,
-                    'stats_download_count': download_count,
                     'stats_reference_count': reference_count,
                     'references': references
                 }
 
-                # Async index fetch (Playwright navigasyon yerine HTTP)
+                # Async index fetch
                 indices = await fetch_indices_async(journal_url_base)
 
                 # PDF URL'sini düzelt
@@ -392,7 +382,7 @@ async def fetch_article_details_parallel(
                 }
 
             except Exception as e:
-                print(f"  Paralel fetch error: {link_info['url'][:40]}... - {e}", file=sys.stderr)
+                print(f"  httpx fetch error: {link_info['url'][:40]}... - {e}", file=sys.stderr)
                 return {
                     'title': link_info['title'],
                     'url': link_info['url'],
@@ -401,13 +391,16 @@ async def fetch_article_details_parallel(
                     'indices': '',
                     'pdf_url': None
                 }
-            finally:
-                if context or page:
-                    await close_context_and_page(context, page)
 
-    # Tüm makaleleri paralel olarak çek
-    tasks = [fetch_single(link) for link in links_to_process]
-    all_results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Tüm makaleleri paralel olarak çek (httpx ile)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
+    }
+    async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
+        tasks = [fetch_single(link, client) for link in links_to_process]
+        all_results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Sonuçları işle ve filtrele
     for result in all_results:
