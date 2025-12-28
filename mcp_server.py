@@ -65,7 +65,7 @@ mcp = FastMCP(
 async def search_articles(
     query: Annotated[str, Field(description="Search query (e.g., 'artificial intelligence', 'sociology'). Leave empty to search all articles.")] = "",
     dergipark_page: Annotated[int, Field(ge=1, description="DergiPark page number (default: 1)")] = 1,
-    page: Annotated[int, Field(ge=1, description="API pagination (5 articles per page, default: 1)")] = 1,
+    page: Annotated[int, Field(ge=1, description="API pagination (24 articles per page, default: 1)")] = 1,
     sort: Annotated[Optional[Literal["newest", "oldest"]], Field(description="Sort order: 'newest' or 'oldest'")] = None,
     article_type: Annotated[Optional[str], Field(description="Article type filter (e.g., '54' = Research Article)")] = None,
     year: Annotated[Optional[str], Field(description="Publication year filter (e.g., '2024', '2023')")] = None,
@@ -75,7 +75,7 @@ async def search_articles(
     """
     Search Turkish academic journals on DergiPark.
 
-    Returns paginated results with 5 articles per page. Each article includes
+    Returns paginated results with 24 articles per page. Each article includes
     title, authors, abstract, keywords, DOI, indexes, and PDF link.
 
     Examples:

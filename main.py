@@ -770,7 +770,7 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
     if search_params.sort_by: query_params['sortBy'] = search_params.sort_by
     if search_params.publication_year: query_params['filter[publication_year][]'] = search_params.publication_year
     target_search_url = f"{base_url}?{urllib.parse.urlencode(query_params, quote_via=urllib.parse.quote)}"
-    page_size = 5  # Fixed page size
+    page_size = 24  # Fixed page size
     print(f"Target DP URL: {target_search_url} | API Page: {search_params.api_page} | Size: {page_size}")
 
     host = str(request.base_url).rstrip('/')

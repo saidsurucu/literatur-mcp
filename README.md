@@ -99,7 +99,7 @@ DergiPark'ta akademik makale arar.
 |-----------|-----|------------|----------|
 | `query` | string | `""` | Arama sorgusu (ör: "yapay zeka") |
 | `dergipark_page` | int | `1` | DergiPark sayfa numarası |
-| `page` | int | `1` | API sayfalama (sayfa başına 5 makale) |
+| `page` | int | `1` | API sayfalama (sayfa başına 24 makale) |
 | `sort` | string | `null` | Sıralama: `newest` veya `oldest` |
 | `article_type` | string | `null` | Makale türü filtresi (ör: `54` = Araştırma Makalesi) |
 | `year` | string | `null` | Yayın yılı filtresi (ör: `2024`) |
@@ -112,7 +112,7 @@ DergiPark'ta akademik makale arar.
   "pagination": {
     "dergipark_page": 1,
     "api_page": 1,
-    "items_per_api_page": 5,
+    "items_per_api_page": 24,
     "total_items_on_dergipark_page": 20
   },
   "articles": [

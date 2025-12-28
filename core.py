@@ -951,7 +951,7 @@ async def search_articles_core(
         query_params['filter[publication_year][]'] = publication_year
 
     target_search_url = f"{base_url}?{urllib.parse.urlencode(query_params, quote_via=urllib.parse.quote)}"
-    page_size = 5
+    page_size = 24
     print(f"Target DP URL: {target_search_url} | API Page: {api_page} | Size: {page_size}", file=sys.stderr)
 
     browser = context = page = None
