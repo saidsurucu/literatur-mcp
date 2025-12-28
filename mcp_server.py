@@ -174,43 +174,6 @@ async def get_article_references(
         return {"error": error_msg, "references": []}
 
 
-@mcp.tool
-async def summarize_article(
-    pdf_id: Annotated[str, Field(description="DergiPark article file ID (e.g., '118146')")],
-    ctx: Context = None,
-) -> str:
-    """
-    Summarize a DergiPark article using LLM.
-
-    Converts the PDF to text and generates a Turkish summary.
-    Requires client to support LLM sampling.
-    """
-    pdf_url = f"https://dergipark.org.tr/tr/download/article-file/{pdf_id}"
-
-    if ctx:
-        await ctx.info(f"Converting PDF: {pdf_id}")
-
-    try:
-        html_content = await pdf_to_html_core(pdf_url)
-
-        if ctx:
-            await ctx.info("Summarizing with LLM...")
-
-        result = await ctx.sample(
-            messages=f"Bu akademik makaleyi Türkçe özetle:\n\n{html_content}",
-            system_prompt="Sen akademik makale özetleme uzmanısın. Kısa ve öz özetler yaz.",
-            max_tokens=1000,
-        )
-
-        return result.text or ""
-
-    except Exception as e:
-        error_msg = f"Summarization error: {str(e)}"
-        if ctx:
-            await ctx.error(error_msg)
-        return f"Error: {error_msg}"
-
-
 # --- Entry Point ---
 
 def main():
