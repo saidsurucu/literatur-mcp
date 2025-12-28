@@ -356,7 +356,7 @@ async def fetch_article_details_parallel(
                     'citation_keywords': raw_details.get('citation_keywords'),
                     'citation_doi': raw_details.get('citation_doi'),
                     'citation_issn': raw_details.get('citation_issn'),
-                    'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100),
+                    'citation_abstract': raw_details.get('citation_abstract', ''),
                     'stats_citation_count': citation_count,
                     'stats_reference_count': reference_count,
                 }
