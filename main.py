@@ -783,7 +783,7 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
 
     host = str(request.base_url).rstrip('/')
     browser = context = page = playwright_instance = None
-    total_items_on_page = 0
+    total_items = 0
 
     try:
         # --- Get Browser from Pool ---
@@ -825,19 +825,18 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
         full_link_list = await get_article_links_with_cache(page, target_search_url, links_cache_key) # Pass cache key
 
         # --- Process Results & Pagination ---
-        total_items_on_page = len(full_link_list)
-        total_api_pages = math.ceil(total_items_on_page / page_size) if total_items_on_page > 0 else 0
-        pagination_info = {"api_page": search_params.api_page, "page_size": page_size, "total_items_on_dergipark_page": total_items_on_page, "total_api_pages_for_dergipark_page": total_api_pages}
+        total_items = len(full_link_list)
+        pagination_info = {"page": search_params.api_page, "per_page": page_size, "count": total_items}
 
         # Handle case where no articles found on DergiPark page
-        if total_items_on_page == 0:
+        if total_items == 0:
             return JSONResponse(content={"pagination": pagination_info, "articles": []})
 
         # Calculate slice - always process only 5 articles
         offset = (search_params.api_page - 1) * page_size
         limit = page_size
         links_to_process = full_link_list[offset : offset + limit]
-        print(f"Links: Total={total_items_on_page}, Slice={len(links_to_process)} (API Page {search_params.api_page}/{total_api_pages})")
+        print(f"Links: Total={total_items}, Slice={len(links_to_process)}")
 
         # Handle case where API page is out of bounds
         if not links_to_process:
@@ -848,7 +847,7 @@ async def search_articles(request: Request, search_params: SearchParams = Body(.
         print(f"Fetching details for {len(links_to_process)} articles...")
         referer_url = page.url # Use last known URL as referer
         for i, link_info in enumerate(links_to_process):
-            print(f"  Processing {offset + i + 1}/{total_items_on_page}: {link_info['url']}")
+            print(f"  Processing {offset + i + 1}/{total_items}: {link_info['url']}")
             details_result = await get_article_details_pw(page, link_info['url'], referer_url=referer_url)
 
             # Combine details into final structure
