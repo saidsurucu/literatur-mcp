@@ -1,31 +1,22 @@
-# 1. Adım: Playwright'ın Python imajını temel al
+# Playwright Python imajı
 FROM mcr.microsoft.com/playwright/python:v1.51.0-jammy
 
-# 2. Adım: Çalışma dizinini ayarla
 WORKDIR /app
 
-# 3. Adım: Bağımlılık dosyasını önce kopyala
-COPY --chown=pwuser:pwuser requirements.txt .
+# uv kur
+RUN pip install uv
 
-# 4. Adım: Python bağımlılıklarını 'pwuser' olarak yükle
-USER pwuser
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-
-# 5. Adım: Uygulama kodunu 'pwuser' olarak kopyala
+# Uygulama dosyalarını kopyala
 COPY --chown=pwuser:pwuser . .
 
-# 6. Adım: Uygulamanın çalışacağı portu belirt
+USER pwuser
+
+# Bağımlılıkları uv ile kur
+RUN uv sync
+
 EXPOSE 8000
 
-# --- PATH Ayarı ---
-# 7. Adım: pwuser'ın local bin dizinini PATH'e ekle
-# Bu, pip ile kurulan uvicorn, gunicorn gibi komutların bulunmasını sağlar.
 ENV PATH=/home/pwuser/.local/bin:$PATH
-# --- Bitti: PATH Ayarı ---
 
-# 8. Adım: Redis Sunucusu Hakkında Not (Hatırlatma)
-# ÖNEMLİ: Redis sunucusu bu imajda DEĞİLDİR... (önceki gibi)
-
-# 9. Adım: MCP ASGI uygulamasını başlat
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# uv run ile başlat
+CMD ["uv", "run", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
