@@ -1,4 +1,4 @@
-# DergiPark MCP: Türk Akademik Dergileri için MCP Sunucusu
+# Literatür MCP: Türk Akademik Dergileri için MCP Sunucusu
 
 ## Word'den UDF'ye profesyonel dönüşüm için yeni uygulamam [udfcevir.com](https://udfcevir.com) adresinde!
 
