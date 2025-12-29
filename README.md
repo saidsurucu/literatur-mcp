@@ -7,9 +7,10 @@
 - **Makale Arama**: Yıl, tür, dizin ve sıralama filtrelerine göre akademik makaleleri arayın
 - **PDF'den HTML'e**: Akademik PDF'leri okunabilir HTML formatına dönüştürün
 - **Akıllı OCR**: Taranmış PDF'ler için otomatik Mistral OCR fallback
-- **CAPTCHA Çözme**: CapSolver API ile otomatik CAPTCHA çözümü
-- **Paralel İşleme**: 5 eşzamanlı tarayıcı ile hızlı makale çekme
-- **Önbellekleme**: Cookie, link ve PDF dönüşümleri için bellek içi önbellek
+- **CAPTCHA Çözme**: CapSolver API ile otomatik Turnstile/reCAPTCHA çözümü
+- **Cookie Kalıcılığı**: Cookie'ler disk ve belleğe kaydedilir, CAPTCHA tekrarını önler
+- **Paralel İşleme**: 3 eşzamanlı HTTP isteği ile hızlı makale çekme
+- **Önbellekleme**: Cookie (30dk), link (10dk) ve PDF (24s) için bellek içi önbellek
 
 ## Kurulum
 
@@ -22,23 +23,14 @@
 
 ```bash
 # Repoyu klonlayın
-git clone https://github.com/saidsurucu/dergipark-mcp.git
-cd dergipark-mcp
+git clone https://github.com/saidsurucu/literatur-mcp.git
+cd literatur-mcp/dergipark-api
 
 # Bağımlılıkları yükleyin
 uv sync
-
-# Playwright tarayıcısını yükleyin
-uv run playwright install chromium
 ```
 
 ### Yapılandırma
-
-`.env.example` dosyasını `.env` olarak kopyalayıp API anahtarlarınızı girin:
-
-```bash
-cp .env.example .env
-```
 
 Ortam değişkenleri:
 
@@ -46,7 +38,7 @@ Ortam değişkenleri:
 |----------|---------|----------|
 | `CAPSOLVER_API_KEY` | Evet | CAPTCHA çözümü için CapSolver API anahtarı |
 | `MISTRAL_API_KEY` | Hayır | Taranmış PDF'ler için Mistral OCR API anahtarı |
-| `HEADLESS_MODE` | Hayır | Tarayıcı modu: `true` (varsayılan) veya `false` |
+| `HEADLESS_MODE` | Hayır | Tarayıcı modu: `true` veya `false` (varsayılan) |
 
 ## Kullanım
 
@@ -60,13 +52,10 @@ Claude Desktop yapılandırma dosyanıza ekleyin:
 {
   "mcpServers": {
     "DergiPark MCP": {
-      "command": "uvx",
-      "args": [
-        "--from", "git+https://github.com/saidsurucu/literatur-mcp",
-        "literatur-mcp"
-      ],
+      "command": "uv",
+      "args": ["run", "python", "mcp_server.py"],
+      "cwd": "/path/to/literatur-mcp/dergipark-api",
       "env": {
-        "HEADLESS_MODE": "true",
         "CAPSOLVER_API_KEY": "capsolver_anahtariniz",
         "MISTRAL_API_KEY": "mistral_anahtariniz"
       }
@@ -91,17 +80,16 @@ uv run python mcp_server.py
 
 ### search_articles
 
-DergiPark'ta akademik makale arar.
+DergiPark'ta akademik makale arar. Sayfa başına 24 makale döndürür.
 
 **Parametreler:**
 
 | Parametre | Tip | Varsayılan | Açıklama |
 |-----------|-----|------------|----------|
 | `query` | string | `""` | Arama sorgusu (ör: "yapay zeka") |
-| `dergipark_page` | int | `1` | DergiPark sayfa numarası |
-| `page` | int | `1` | API sayfalama (sayfa başına 24 makale) |
+| `page` | int | `1` | Sayfa numarası (sayfa başına 24 makale) |
 | `sort` | string | `null` | Sıralama: `newest` veya `oldest` |
-| `article_type` | string | `null` | Makale türü filtresi (ör: `54` = Araştırma Makalesi) |
+| `article_type` | string | `null` | Makale türü (ör: `54` = Araştırma Makalesi) |
 | `year` | string | `null` | Yayın yılı filtresi (ör: `2024`) |
 | `index_filter` | string | `hepsi` | Dizin filtresi: `tr_dizin_icerenler`, `bos_olmayanlar`, `hepsi` |
 
@@ -110,23 +98,25 @@ DergiPark'ta akademik makale arar.
 ```json
 {
   "pagination": {
-    "dergipark_page": 1,
-    "api_page": 1,
-    "items_per_api_page": 24,
-    "total_items_on_dergipark_page": 20
+    "page": 1,
+    "per_page": 24,
+    "count": 24
   },
   "articles": [
     {
       "title": "Makale Başlığı",
-      "authors": "Yazar Adı",
-      "journal": "Dergi Adı",
-      "year": "2024",
-      "abstract": "Makale özeti...",
-      "keywords": "anahtar1, anahtar2",
-      "doi": "10.1234/ornek",
-      "indexes": "TR Dizin, DOAJ",
-      "pdf_link": "https://dergipark.org.tr/tr/download/article-file/123456",
-      "article_url": "https://dergipark.org.tr/tr/pub/dergi/issue/123/456"
+      "url": "https://dergipark.org.tr/tr/pub/dergi/article/123456",
+      "details": {
+        "citation_title": "Makale Başlığı",
+        "citation_author": "Yazar Adı",
+        "citation_journal_title": "Dergi Adı",
+        "citation_publication_date": "2024",
+        "citation_abstract": "Makale özeti...",
+        "citation_keywords": "anahtar1, anahtar2",
+        "citation_doi": "10.1234/ornek"
+      },
+      "indices": "TR Dizin, DOAJ",
+      "pdf_url": "https://dergipark.org.tr/tr/download/article-file/123456"
     }
   ]
 }
@@ -144,55 +134,44 @@ DergiPark PDF'ini okunabilir HTML formatına dönüştürür.
 
 URL otomatik oluşturulur: `https://dergipark.org.tr/tr/download/article-file/{pdf_id}`
 
-**PDF İşleme Akışı:**
+### get_article_references
 
-1. PDF'i DergiPark'tan indir
-2. PyMuPDF ile metin çıkar
-3. Metin < 100 karakter ise (taranmış PDF) Mistral OCR kullan
-4. Formatlanmış HTML döndür
+Makale referans listesini çeker.
 
-## REST API
+**Parametreler:**
 
-Proje ayrıca FastAPI REST sunucusu içerir (`main.py`):
+| Parametre | Tip | Açıklama |
+|-----------|-----|----------|
+| `article_url` | string | DergiPark makale URL'i |
+
+## Docker ile Çalıştırma
 
 ```bash
-# API sunucusunu çalıştır
-python main.py
+# Build
+docker build -t dergipark-mcp .
+
+# Run
+docker run -p 8000:8000 \
+  -e CAPSOLVER_API_KEY=your_key \
+  -e HEADLESS_MODE=false \
+  dergipark-mcp
 ```
-
-**Endpoint'ler:**
-
-- `POST /api/search` - Makale ara
-- `GET /api/pdf-to-html?pdf_url=...` - PDF'i HTML'e dönüştür
-- `GET /health` - Sağlık kontrolü
 
 ## Mimari
 
 ```
 dergipark-api/
 ├── mcp_server.py    # MCP sunucusu (FastMCP)
-├── main.py          # REST API (FastAPI)
 ├── core.py          # Ortak iş mantığı
-│   ├── BrowserPoolManager  # Playwright tarayıcı havuzu
-│   ├── CAPTCHA çözme       # CapSolver entegrasyonu
-│   ├── Makale kazıma       # Paralel çekme
-│   ├── PDF işleme          # PyMuPDF + Mistral OCR
-│   └── Önbellekleme        # TTL cache'ler
-├── .env.example     # Ortam değişkenleri şablonu
-└── requirements.txt # Bağımlılıklar
+│   ├── browser-use      # Tarayıcı otomasyonu
+│   ├── CAPTCHA çözme    # CapSolver entegrasyonu
+│   ├── Cookie kalıcılığı # Bellek + disk
+│   ├── Paralel çekme    # httpx async
+│   └── PDF işleme       # PyMuPDF + Mistral OCR
+├── Dockerfile       # Docker build
+└── fly.toml         # Fly.io deployment
 ```
-
-## Performans
-
-- **Tarayıcı Havuzu**: Paralel işleme için 5 eşzamanlı tarayıcı
-- **Paralel Çekme**: 3 eşzamanlı makale detay çekme
-- **Async Dizin Çekme**: Dergi dizinleri için bloklamayan HTTP istekleri
-- **Önbellekleme**: Cookie (30dk), Link (10dk), PDF (24s)
 
 ## Lisans
 
 MIT
-
-## Katkıda Bulunma
-
-Katkılarınızı bekliyoruz! Issue açabilir veya pull request gönderebilirsiniz.
