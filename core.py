@@ -421,10 +421,36 @@ async def scrape_article_links_browser_use(search_url: str, cache_key: Any) -> L
         await browser.start()
         print("browser-use started.", file=sys.stderr)
 
-        # Search sayfasına git
-        print(f"Navigating to: {search_url}", file=sys.stderr)
-        page = await browser.new_page(search_url)
-        await asyncio.sleep(2)
+        # Cookie'leri yükle (önce cache, sonra disk)
+        cookies_to_load = cookie_cache.get(COOKIES_CACHE_KEY) or load_cookies_from_disk()
+
+        if cookies_to_load:
+            # Önce dergipark'a git (cookie set edebilmek için)
+            print("Loading cookies - navigating to dergipark first...", file=sys.stderr)
+            page = await browser.new_page("https://dergipark.org.tr")
+            await asyncio.sleep(1)
+
+            print(f"Loading {len(cookies_to_load)} cookies into browser...", file=sys.stderr)
+            try:
+                # JavaScript ile cookie'leri ekle
+                for cookie in cookies_to_load:
+                    name = cookie.get('name', '')
+                    value = cookie.get('value', '')
+                    if name and value:
+                        await page.evaluate(f"() => {{ document.cookie = '{name}={value}; path=/; domain=.dergipark.org.tr'; }}")
+                print("Cookies loaded successfully.", file=sys.stderr)
+            except Exception as e:
+                print(f"Warning: Failed to load cookies: {e}", file=sys.stderr)
+
+            # Aynı sayfada search URL'e git
+            print(f"Navigating to: {search_url}", file=sys.stderr)
+            await page.goto(search_url)
+            await asyncio.sleep(2)
+        else:
+            # Cookie yoksa direkt search sayfasına git
+            print(f"No cookies to load. Navigating to: {search_url}", file=sys.stderr)
+            page = await browser.new_page(search_url)
+            await asyncio.sleep(2)
 
         # URL kontrolü - CAPTCHA sayfasında mıyız?
         current_url = await page.evaluate("() => window.location.href")
