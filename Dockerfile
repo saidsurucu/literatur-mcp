@@ -44,6 +44,6 @@ ENV HEADLESS_MODE=false
 ENV DISPLAY=:99
 
 # Başlatma scripti
-RUN echo '#!/bin/bash\nXvfb :99 -screen 0 1280x720x24 &\nsleep 1\nexec uv run uvicorn app:app --host 0.0.0.0 --port 8000' > /app/start.sh && chmod +x /app/start.sh
+RUN echo '#!/bin/bash\nXvfb :99 -screen 0 1280x720x24 &\nsleep 1\nexec uv run uvicorn app:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 180' > /app/start.sh && chmod +x /app/start.sh
 
 CMD ["/app/start.sh"]
