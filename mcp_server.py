@@ -21,22 +21,21 @@ from core import (
     search_articles_core,
     pdf_to_html_core,
     get_article_references_core,
-    browser_pool_manager,
+    browser_manager,
 )
 
 
 # --- Lifespan Context Manager ---
 @asynccontextmanager
 async def lifespan(server: FastMCP):
-    """Manage browser pool lifecycle."""
+    """Manage browser-use lifecycle."""
     print("=== MCP SERVER STARTUP ===", file=sys.stderr)
-    await browser_pool_manager.initialize()
-    print("=== BROWSER POOL READY ===", file=sys.stderr)
+    await browser_manager.initialize()
     try:
         yield {}
     finally:
         print("=== MCP SERVER SHUTDOWN ===", file=sys.stderr)
-        await browser_pool_manager.cleanup()
+        await browser_manager.cleanup()
         print("=== CLEANUP COMPLETE ===", file=sys.stderr)
 
 

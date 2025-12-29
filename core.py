@@ -9,6 +9,7 @@ tarafından kullanılabilir.
 
 import asyncio
 import html
+import json
 import math
 import os
 import pickle
@@ -26,8 +27,8 @@ import httpx
 from bs4 import BeautifulSoup
 from cachetools import TTLCache
 import fitz
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError, Page, BrowserContext
 from mistralai import Mistral
+from browser_use import Browser as BrowserUseBrowser
 
 # --- Configuration ---
 # Hafıza İçi Önbellek Ayarları
@@ -48,14 +49,14 @@ CAPSOLVER_GET_RESULT_URL = "https://api.capsolver.com/getTaskResult"
 # Mistral OCR Ayarları (PDF fallback)
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 
-# Playwright Ayarları
+# Browser Ayarları (browser-use)
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
 ]
-HEADLESS_MODE = os.getenv("HEADLESS_MODE", "true").lower() == "true"
+HEADLESS_MODE = False
 
 # PDF Cache
 PDF_CACHE_TTL = int(os.getenv("PDF_CACHE_TTL", 86400))
@@ -176,127 +177,35 @@ async def fetch_indices_async(journal_url_base: str) -> str:
         return ''
 
 
-# --- Browser Pool Management ---
-class BrowserPool:
-    """Browser pool manager for Playwright instances."""
+# --- Browser-Use Manager ---
+class BrowserUseManager:
+    """Browser manager using browser-use library (verify-lawyer pattern)."""
 
-    def __init__(self, pool_size: int = BROWSER_POOL_SIZE):
-        self.pool_size = pool_size
-        self.browsers = []
-        self.authenticated_browsers = set()
+    def __init__(self):
         self.lock = asyncio.Lock()
-        self.playwright_instance = None
+        self._initialized = False
 
     async def initialize(self):
-        """Initialize browser pool on startup."""
-        try:
-            print(f"Initializing browser pool with {self.pool_size} browsers...", file=sys.stderr)
-            self.playwright_instance = await async_playwright().start()
+        """Initialize browser-use manager."""
+        print("=== BROWSER-USE MANAGER READY ===", file=sys.stderr)
+        self._initialized = True
 
-            for i in range(self.pool_size):
-                browser = await self.create_browser()
-                self.browsers.append(browser)
-                print(f"Browser {i+1}/{self.pool_size} created", file=sys.stderr)
-
-            print("Browser pool initialization complete!", file=sys.stderr)
-        except Exception as e:
-            print(f"Failed to initialize browser pool: {e}", file=sys.stderr)
-            raise
-
-    async def create_browser(self):
-        """Create a single browser instance."""
-        browser = await self.playwright_instance.chromium.launch(
-            headless=HEADLESS_MODE,
-            args=[
-                '--disable-dev-shm-usage',
-                '--no-sandbox',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-features=AutomationControlled',
-                '--disable-client-side-phishing-detection',
-                '--disable-component-update',
-                '--no-first-run',
-            ]
+    async def create_browser(self) -> BrowserUseBrowser:
+        """Create a new browser-use instance with verify-lawyer parameters."""
+        browser = BrowserUseBrowser(
+            headless=False,
+            window_size={'width': 1, 'height': 1},
+            args=['--window-position=-2400,-2400']
         )
         return browser
 
-    async def get_browser_and_context(self) -> Tuple[Any, BrowserContext, Page]:
-        """Get browser from pool and create new context."""
-        async with self.lock:
-            if not self.browsers:
-                raise RuntimeError("No browsers available in pool")
-
-            # Prefer authenticated browsers first
-            browser = None
-            for b in self.browsers:
-                if b in self.authenticated_browsers and b.is_connected():
-                    browser = b
-                    break
-
-            # Fallback to any available browser
-            if not browser:
-                for b in self.browsers:
-                    if b.is_connected():
-                        browser = b
-                        break
-
-            if not browser:
-                print("No healthy browser found, creating new one...", file=sys.stderr)
-                browser = await self.create_browser()
-                self.browsers[0] = browser
-
-            # Create fresh context
-            context = await browser.new_context(
-                user_agent=random.choice(USER_AGENTS),
-                locale='tr-TR',
-                viewport={'width': 1920, 'height': 1080},
-                ignore_https_errors=True
-            )
-            page = await context.new_page()
-
-            print(f"Using browser from pool (authenticated: {browser in self.authenticated_browsers})", file=sys.stderr)
-            return browser, context, page
-
-    async def mark_authenticated(self, browser):
-        """Mark browser as CAPTCHA-solved."""
-        async with self.lock:
-            self.authenticated_browsers.add(browser)
-            print("Browser marked as authenticated", file=sys.stderr)
-
     async def cleanup(self):
-        """Close all browsers in pool."""
-        print("Cleaning up browser pool...", file=sys.stderr)
-        async with self.lock:
-            for browser in self.browsers:
-                try:
-                    if browser.is_connected():
-                        await browser.close()
-                except Exception as e:
-                    print(f"Error closing browser: {e}", file=sys.stderr)
-            self.browsers.clear()
-            self.authenticated_browsers.clear()
-
-        if self.playwright_instance:
-            try:
-                await self.playwright_instance.stop()
-                print("Playwright instance stopped", file=sys.stderr)
-            except Exception as e:
-                print(f"Error stopping playwright: {e}", file=sys.stderr)
+        """Cleanup (no-op for browser-use, each browser is closed after use)."""
+        print("Browser-use manager cleanup complete.", file=sys.stderr)
 
 
-# Global browser pool instance
-browser_pool_manager = BrowserPool()
-
-
-async def close_context_and_page(context, page):
-    """Safely close context and page (keep browser in pool)."""
-    try:
-        if page and not page.is_closed():
-            await page.close()
-        if context:
-            await context.close()
-    except Exception as e:
-        if "closed" not in str(e).lower():
-            print(f"Warning: Error closing context/page: {e}", file=sys.stderr)
+# Global browser-use manager instance
+browser_manager = BrowserUseManager()
 
 
 async def fetch_article_details_parallel(
@@ -481,419 +390,273 @@ async def get_article_references_core(article_url: str) -> dict:
         }
 
 
-# --- CAPTCHA Handling ---
-async def _inject_and_submit_captcha(page: Page, token: str, verification_submit_selector: str, captcha_type: str = "recaptcha") -> bool:
-    """Helper: Injects token (with events), clicks submit, checks result."""
-    if captcha_type == "turnstile":
-        injection_target_selector = '[name="cf-turnstile-response"]'
-        js_func = """(t)=>{let e=document.querySelector('[name="cf-turnstile-response"]');if(e){console.log('Injecting Turnstile token...');e.value=t;e.dispatchEvent(new Event('input',{bubbles:!0}));e.dispatchEvent(new Event('change',{bubbles:!0}));console.log('Injected/dispatched.');return!0}return console.error('cf-turnstile-response missing!'),!1}"""
-    else:
-        injection_target_selector = '#g-recaptcha-response'
-        js_func = """(t)=>{let e=document.getElementById('g-recaptcha-response');if(e){console.log('Injecting token...');e.value=t;e.dispatchEvent(new Event('input',{bubbles:!0}));e.dispatchEvent(new Event('change',{bubbles:!0}));console.log('Injected/dispatched.');return!0}return console.error('#g-recaptcha-response missing!'),!1}"""
+# --- browser-use Based Scraping (verify-lawyer pattern) ---
 
-    try:
-        print(f"Injecting {captcha_type} token via JS: {token[:15]}...", file=sys.stderr)
-        injection_success = await page.evaluate(js_func, token)
-        if not injection_success:
-            print(f"Error: Injection JS failed, target '{injection_target_selector}' not found?.", file=sys.stderr)
-            return False
-
-        print("Token injection script executed successfully.", file=sys.stderr)
-
-        if captcha_type == "turnstile":
-            print("Waiting for Turnstile to process token...", file=sys.stderr)
-            await asyncio.sleep(random.uniform(2.0, 3.5))
-            try:
-                await page.evaluate("""
-                    () => {
-                        const submitBtn = document.querySelector('form[name="search_verification"] button[type="submit"]');
-                        if (submitBtn && submitBtn.classList.contains('kt-hidden')) {
-                            console.log('Removing kt-hidden class from submit button...');
-                            submitBtn.classList.remove('kt-hidden');
-                            return true;
-                        }
-                        return false;
-                    }
-                """)
-                print("Attempted to unhide submit button.", file=sys.stderr)
-            except Exception as e:
-                print(f"Could not unhide button via JS: {e}", file=sys.stderr)
-        else:
-            await asyncio.sleep(random.uniform(0.5, 1.2))
-
-        submit_button = page.locator(verification_submit_selector)
-        print(f"Looking for submit button ('{verification_submit_selector}')...", file=sys.stderr)
-        try:
-            await submit_button.wait_for(state="attached", timeout=7000)
-            await page.evaluate("""
-                () => {
-                    const submitBtn = document.querySelector('form[name="search_verification"] button[type="submit"]');
-                    if (submitBtn) {
-                        submitBtn.classList.remove('kt-hidden');
-                        submitBtn.style.display = 'block';
-                        submitBtn.style.visibility = 'visible';
-                    }
-                }
-            """)
-            await asyncio.sleep(0.5)
-            await submit_button.wait_for(state="visible", timeout=5000)
-            print("Clicking 'Devam Et' button...", file=sys.stderr)
-            async with page.expect_navigation(wait_until='load', timeout=35000):
-                await submit_button.click()
-            print("Submit clicked, navigation finished ('load' event).", file=sys.stderr)
-
-            current_url = page.url
-            print(f"URL after submit: {current_url}", file=sys.stderr)
-            if "verification" in current_url:
-                print("Submission failed: Still on verification page.", file=sys.stderr)
-                return False
-            else:
-                print("Submission seems successful: Navigated away from verification page.", file=sys.stderr)
-                return True
-
-        except Exception as e_sub:
-            print(f"Error during submit/navigation: {e_sub}", file=sys.stderr)
-            return False
-
-    except Exception as e_js:
-        print(f"Error executing JS injection: {e_js}", file=sys.stderr)
-        return False
-
-
-async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
-    """Solves reCAPTCHA v2 by fetching a *new* token from CapSolver."""
-    print("CAPTCHA detected. Fetching NEW token from CapSolver...", file=sys.stderr)
-    site_key_element_selector = '.g-recaptcha[data-sitekey]'
-    verification_submit_selector = 'form[name="search_verification"] button[type="submit"]:has-text("Devam Et")'
-
-    if not CAPSOLVER_API_KEY:
-        print("Error: CAPSOLVER_API_KEY environment variable is not set.", file=sys.stderr)
-        return False
-
-    try:
-        # Fetch Site Key from page source
-        site_key = None
-        page_url = page.url
-        page_content = await page.content()
-        sitekey_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', page_content)
-        if sitekey_match:
-            site_key = sitekey_match.group(1)
-            print(f"Sitekey: {site_key}, URL: {page_url}", file=sys.stderr)
-        else:
-            print("No sitekey found in page source.", file=sys.stderr)
-            return False
-
-        # Determine CAPTCHA Type
-        if site_key.startswith("0x4"):
-            task_type = "AntiTurnstileTaskProxyLess"
-            captcha_type = "turnstile"
-            injection_target_selector = '[name="cf-turnstile-response"]'
-            print("Detected Cloudflare Turnstile CAPTCHA", file=sys.stderr)
-        else:
-            task_type = "ReCaptchaV2TaskProxyless"
-            captcha_type = "recaptcha"
-            injection_target_selector = '#g-recaptcha-response'
-            print("Detected reCAPTCHA v2", file=sys.stderr)
-
-        # Call CapSolver API
-        task_payload = {"clientKey": CAPSOLVER_API_KEY, "task": {"type": task_type, "websiteURL": page_url, "websiteKey": site_key}}
-        captcha_token = None
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            print("Sending task to CapSolver...", file=sys.stderr)
-            task_id = None
-            try:
-                create_response = await client.post(CAPSOLVER_CREATE_TASK_URL, json=task_payload)
-                create_response.raise_for_status()
-                create_result = create_response.json()
-                if create_result.get("errorId", 0) != 0:
-                    raise ValueError(f"API Error Create: {create_result}")
-                task_id = create_result.get("taskId")
-                if not task_id:
-                    raise ValueError("No Task ID received.")
-                print(f"CapSolver Task created: {task_id}", file=sys.stderr)
-            except Exception as e:
-                print(f"Error Creating CapSolver Task: {e}", file=sys.stderr)
-                return False
-
-            # Poll for Result
-            start_time = time.time()
-            timeout_seconds = 180
-            fail_count = 0
-            max_failures = 3
-            while time.time() - start_time < timeout_seconds:
-                await asyncio.sleep(6)
-                print(f"Polling CapSolver (ID: {task_id})...", file=sys.stderr)
-                result_payload = {"clientKey": CAPSOLVER_API_KEY, "taskId": task_id}
-                try:
-                    get_response = await client.post(CAPSOLVER_GET_RESULT_URL, json=result_payload, timeout=15)
-                    get_response.raise_for_status()
-                    get_result = get_response.json()
-                    error_code = get_result.get("errorCode", "")
-                    status = get_result.get("status")
-                    print(f"Task status: {status}", file=sys.stderr)
-
-                    # Definitively failed - don't retry
-                    if status in ["failed", "error"] or error_code == "ERROR_CAPTCHA_SOLVE_FAILED":
-                        print(f"CapSolver task definitively failed: {get_result.get('errorDescription', 'N/A')}", file=sys.stderr)
-                        break
-
-                    if status == "ready":
-                        solution = get_result.get("solution")
-                        if solution:
-                            captcha_token = solution.get("token") or solution.get("gRecaptchaResponse")
-                        if captcha_token:
-                            print("CapSolver solution received!", file=sys.stderr)
-                            break
-                except Exception as e:
-                    fail_count += 1
-                    print(f"Warning: Error Polling CapSolver Task ({fail_count}/{max_failures}): {e}", file=sys.stderr)
-                    if fail_count >= max_failures:
-                        print("Max polling failures reached, giving up.", file=sys.stderr)
-                        break
-                    await asyncio.sleep(5)
-
-            if not captcha_token:
-                print("Polling timeout or final error getting token.", file=sys.stderr)
-                return False
-
-        # Submit with the new token
-        print("New token received. Attempting submission...", file=sys.stderr)
-        try:
-            print(f"Waiting for injection target ('{injection_target_selector}')...", file=sys.stderr)
-            await page.wait_for_selector(injection_target_selector, state="attached", timeout=10000)
-            print("Injection target found.", file=sys.stderr)
-        except PlaywrightTimeoutError:
-            print("Timeout waiting for injection target before submission.", file=sys.stderr)
-            return False
-
-        submission_successful = await _inject_and_submit_captcha(page, captcha_token, verification_submit_selector, captcha_type)
-
-        if not submission_successful:
-            print("Submission failed with the new token from CapSolver.", file=sys.stderr)
-        return submission_successful
-
-    except Exception as e:
-        print(f"Unexpected error during CAPTCHA solving process: {e}", file=sys.stderr)
-        return False
-
-
-# --- Article Details Fetching ---
-async def get_article_details_pw(page: Page, article_url: str, referer_url: Optional[str] = None) -> dict:
-    """Fetches metadata and index info for a single article URL with retries."""
-    print(f"Fetching details: {article_url}", file=sys.stderr)
-    details = {'error': None}
-    pdf_url = None
-    indices = ''
-    retries = 0
-    max_retries = 1
-
-    while retries <= max_retries:
-        try:
-            print(f"Attempt {retries + 1} for {article_url}", file=sys.stderr)
-            await page.set_extra_http_headers({'Referer': referer_url or page.url})
-            await page.goto(article_url, wait_until='domcontentloaded', timeout=30000)
-            html_content = await page.content()
-
-            if any(s in html_content.lower() for s in ["cloudflare", "captcha", "blocked", "erişim engellendi"]):
-                print(f"Blocking pattern detected on details page: {article_url}", file=sys.stderr)
-                details['error'] = "Blocked"
-                break
-
-            soup = BeautifulSoup(html_content, 'html5lib')
-            meta_tags = soup.find_all('meta')
-            if not meta_tags:
-                print(f"No meta tags found (Attempt {retries + 1}).", file=sys.stderr)
-                if retries < max_retries:
-                    await asyncio.sleep(1.5 * (retries + 1))
-                    retries += 1
-                    continue
-                else:
-                    details['error'] = "No meta tags found after retries"
-                    break
-
-            raw_details = {tag.get('name'): tag.get('content', '').strip() for tag in meta_tags if tag.get('name')}
-            pdf_url = raw_details.get('citation_pdf_url')
-            journal_url_base = raw_details.get('DC.Source.URI')
-
-            details = {
-                'citation_title': raw_details.get('citation_title'),
-                'citation_author': raw_details.get('DC.Creator.PersonalName'),
-                'citation_journal_title': raw_details.get('citation_journal_title'),
-                'citation_publication_date': raw_details.get('citation_publication_date'),
-                'citation_keywords': raw_details.get('citation_keywords'),
-                'citation_doi': raw_details.get('citation_doi'),
-                'citation_issn': raw_details.get('citation_issn'),
-                'citation_abstract': truncate_text(raw_details.get('citation_abstract', ''), 100)
-            }
-
-            if journal_url_base:
-                try:
-                    index_url = f"{journal_url_base.rstrip('/')}/indexes"
-                    print(f"Fetching indexes from: {index_url}", file=sys.stderr)
-                    await page.goto(index_url, wait_until='domcontentloaded', timeout=12000)
-                    index_soup = BeautifulSoup(await page.content(), 'html5lib')
-                    indices_list = [
-                        i.text.strip() for i in index_soup.select('h5.j-index-listing-index-title') if i.text
-                    ]
-                    indices = ', '.join(indices_list)
-                    print(f"Found indexes: {indices or 'None'}", file=sys.stderr)
-                except Exception as e_idx:
-                    print(f"Warning: Index page error/timeout for {journal_url_base}: {e_idx}", file=sys.stderr)
-                finally:
-                    try:
-                        if page.url != article_url:
-                            print("Navigating back to article page after index check...", file=sys.stderr)
-                            await page.goto(article_url, wait_until='domcontentloaded', timeout=10000)
-                    except Exception as e_back:
-                        print(f"Warning: Failed to navigate back to article page: {e_back}", file=sys.stderr)
-
-            details['error'] = None
-            print(f"Successfully fetched details for {article_url}", file=sys.stderr)
-            break
-
-        except PlaywrightTimeoutError:
-            print(f"Timeout fetching details (Attempt {retries + 1})", file=sys.stderr)
-            if retries < max_retries:
-                await asyncio.sleep(2 * (retries + 1))
-                retries += 1
-                continue
-            else:
-                details['error'] = "Timeout after retries"
-                break
-
-        except Exception as e:
-            print(f"Error fetching details (Attempt {retries + 1}): {e}", file=sys.stderr)
-            if retries < max_retries:
-                await asyncio.sleep(2 * (retries + 1))
-                retries += 1
-                continue
-            else:
-                details['error'] = f"Error after retries: {e}"
-                break
-
-    return {'details': details, 'pdf_url': pdf_url, 'indices': indices}
-
-
-# --- Article Links with Cache ---
-async def get_article_links_with_cache(
-    page: Page, search_url: str, cache_key: Any
-) -> List[Dict[str, str]]:
-    """Gets links. Uses global TTLCache. Fetches if miss. Handles CAPTCHA. Saves cookies if solved."""
-    # Check Cache
+async def scrape_article_links_browser_use(search_url: str, cache_key: Any) -> List[Dict[str, str]]:
+    """
+    browser-use ile DergiPark'tan makale linklerini çeker.
+    CAPTCHA varsa: 5s Turnstile auto-pass + CapSolver fallback.
+    verify-lawyer pattern'i ile birebir aynı parametreler.
+    """
+    # Check Cache first
     try:
         cached_data = links_cache.get(cache_key)
         if cached_data is not None:
             print(f"Cache HIT: Links {str(cache_key)[:100]}...", file=sys.stderr)
             return cached_data
     except Exception as e:
-        print(f"Warning: Links cache GET error for key {str(cache_key)[:100]}...: {e}", file=sys.stderr)
+        print(f"Warning: Links cache GET error: {e}", file=sys.stderr)
 
-    print(f"Cache MISS: Links {str(cache_key)[:100]}... Fetching from DergiPark...", file=sys.stderr)
+    print(f"Cache MISS: Fetching from DergiPark with browser-use...", file=sys.stderr)
+    browser = None
     article_links = []
-    article_card_selector = 'div.card.article-card.dp-card-outline'
-    captcha_was_solved = False
 
     try:
+        # browser-use Browser (verify-lawyer ile birebir aynı parametreler)
+        browser = BrowserUseBrowser(
+            headless=False,
+            window_size={'width': 1, 'height': 1},
+            args=['--window-position=-2400,-2400']
+        )
+        await browser.start()
+        print("browser-use started.", file=sys.stderr)
+
+        # Search sayfasına git
         print(f"Navigating to: {search_url}", file=sys.stderr)
-        await page.goto(search_url, wait_until='load', timeout=40000)
-        print(f"Nav complete. URL: {page.url}", file=sys.stderr)
+        page = await browser.new_page(search_url)
+        await asyncio.sleep(2)
 
-        if "/search/verification" in page.url or "verification" in page.url:
-            print("CAPTCHA page detected.", file=sys.stderr)
-            captcha_passed = await solve_recaptcha_v2_capsolver_direct_async(page)
-            if not captcha_passed:
-                raise RuntimeError("CAPTCHA solving failed.")
-            print("CAPTCHA passed. Waiting for results page to load...", file=sys.stderr)
-            captcha_was_solved = True
-            try:
-                await page.wait_for_load_state("domcontentloaded", timeout=10000)
-                await page.wait_for_load_state("networkidle", timeout=20000)
-                print("Results page loaded after CAPTCHA.", file=sys.stderr)
-            except Exception as e:
-                print(f"Load state wait warning: {e}", file=sys.stderr)
-        else:
-            print("No CAPTCHA detected.", file=sys.stderr)
+        # URL kontrolü - CAPTCHA sayfasında mıyız?
+        current_url = await page.evaluate("() => window.location.href")
+        print(f"Current URL: {current_url}", file=sys.stderr)
 
-        current_url = page.url
-        if "section=article" not in current_url:
-            try:
-                print("Not on article section yet, looking for article section link to click...", file=sys.stderr)
-                article_section_link = await page.query_selector('a.search-section-link[href*="section=article"]')
-                if article_section_link:
-                    print("Clicking on article section...", file=sys.stderr)
-                    await article_section_link.click()
-                    await page.wait_for_load_state("networkidle", timeout=20000)
-                    print("Article section loaded.", file=sys.stderr)
-                else:
-                    print("Article section link not found.", file=sys.stderr)
-            except Exception as e:
-                print(f"Warning: Could not click article section: {e}", file=sys.stderr)
-        else:
-            print("Already on article section (URL contains section=article), skipping click to preserve filters.", file=sys.stderr)
+        if "verification" in current_url:
+            print("CAPTCHA page detected. Trying Turnstile auto-pass...", file=sys.stderr)
 
-        print("Waiting for client-side JavaScript filtering...", file=sys.stderr)
-        await asyncio.sleep(3)
-        await page.wait_for_load_state("networkidle", timeout=10000)
-        print("JavaScript filtering should be complete.", file=sys.stderr)
+            # 5 saniye bekle - Turnstile auto-pass
+            await asyncio.sleep(5)
 
-        try:
-            print(f"Waiting for article cards with selector: {article_card_selector}", file=sys.stderr)
-            await page.wait_for_selector(article_card_selector, state="attached", timeout=15000)
-            article_cards = await page.query_selector_all(article_card_selector)
-            print(f"{len(article_cards)} article cards found.", file=sys.stderr)
-        except PlaywrightTimeoutError:
-            page_content = await page.content()
-            if "sonuç bulunamadı" in page_content.lower():
-                print("No results message detected.", file=sys.stderr)
-                article_links = []
+            # Submit butonuna tıkla
+            await page.evaluate("""() => {
+                const btn = document.querySelector('form[name="search_verification"] button[type="submit"]');
+                if (btn) {
+                    btn.classList.remove('kt-hidden');
+                    btn.style.display = 'block';
+                    btn.disabled = false;
+                    btn.click();
+                }
+            }""")
+
+            # Navigation bekle
+            await asyncio.sleep(3)
+
+            # URL kontrolü
+            current_url = await page.evaluate("() => window.location.href")
+            print(f"URL after Turnstile attempt: {current_url}", file=sys.stderr)
+
+            if "verification" in current_url:
+                # Turnstile başarısız, CapSolver dene
+                print("Turnstile auto-pass failed, trying CapSolver...", file=sys.stderr)
+                captcha_solved = await solve_captcha_with_capsolver_browser_use(browser, page)
+                if not captcha_solved:
+                    raise RuntimeError("CAPTCHA solving failed (Turnstile + CapSolver).")
+                current_url = await page.evaluate("() => window.location.href")
             else:
-                print("DEBUG: Searching for alternative selectors...", file=sys.stderr)
-                alt_cards = await page.query_selector_all("div.card")
-                print(f"DEBUG: Found {len(alt_cards)} elements with class 'card'", file=sys.stderr)
-                article_divs = await page.query_selector_all("div.article-card")
-                print(f"DEBUG: Found {len(article_divs)} elements with class 'article-card'", file=sys.stderr)
-                raise RuntimeError("Link extraction failed (timeout finding cards).")
+                print("Turnstile auto-pass SUCCESS!", file=sys.stderr)
 
-        if article_cards:
-            base_page_url = page.url
-            for card in article_cards:
-                a_tag = await card.query_selector('h5.card-title > a[href]')
-                if a_tag:
-                    url = await a_tag.get_attribute('href')
-                    title = await a_tag.text_content()
-                    absolute_url = urllib.parse.urljoin(base_page_url, url.strip())
-                    article_links.append({'url': absolute_url, 'title': title.strip() or "N/A"})
+        # Artık search sonuçları sayfasındayız
+        print(f"On results page: {current_url}", file=sys.stderr)
 
+        # Article section'a tıkla (eğer gerekiyorsa)
+        if "section=article" not in current_url:
+            print("Clicking on article section...", file=sys.stderr)
+            await page.evaluate("""() => {
+                const link = document.querySelector('a.search-section-link[href*="section=article"]');
+                if (link) link.click();
+            }""")
+            await asyncio.sleep(3)
+
+        # JavaScript filtering bekle
+        print("Waiting for JavaScript filtering...", file=sys.stderr)
+        await asyncio.sleep(3)
+
+        # Makale kartlarını çek
+        print("Extracting article links...", file=sys.stderr)
+        article_links_raw = await page.evaluate("""() => {
+            const cards = document.querySelectorAll('div.card.article-card.dp-card-outline');
+            const links = [];
+            cards.forEach(card => {
+                const a = card.querySelector('h5.card-title > a[href]');
+                if (a) {
+                    links.push({
+                        url: a.href,
+                        title: a.textContent.trim() || 'N/A'
+                    });
+                }
+            });
+            return links;
+        }""")
+
+        # browser-use page.evaluate JSON string dönüyor - parse et
+        if isinstance(article_links_raw, str):
+            try:
+                article_links = json.loads(article_links_raw)
+                print(f"Parsed JSON: {len(article_links)} article links.", file=sys.stderr)
+            except json.JSONDecodeError as e:
+                print(f"JSON parse error: {e}", file=sys.stderr)
+                article_links = []
+        else:
+            article_links = article_links_raw if article_links_raw else []
+
+        print(f"Found {len(article_links)} article links.", file=sys.stderr)
+
+        # Cache'e kaydet
         try:
             links_cache[cache_key] = article_links
-            print(f"Stored {len(article_links)} links in link cache: {str(cache_key)[:100]}...", file=sys.stderr)
+            print(f"Stored {len(article_links)} links in cache.", file=sys.stderr)
         except Exception as e:
-            print(f"Warning: Links cache SET error for key {str(cache_key)[:100]}...: {e}", file=sys.stderr)
+            print(f"Warning: Cache SET error: {e}", file=sys.stderr)
 
-        if captcha_was_solved:
-            try:
-                print("Saving cookies post-CAPTCHA to in-memory cache...", file=sys.stderr)
-                browser_context = page.context
-                current_cookies = await browser_context.cookies(urls=[page.url])
-                if current_cookies:
-                    for c in current_cookies:
-                        if 'expires' in c and isinstance(c['expires'], float):
-                            c['expires'] = int(c['expires'])
-                    cookie_cache[COOKIES_CACHE_KEY] = current_cookies
-                    print(f"Saved {len(current_cookies)} cookies to cache '{COOKIES_CACHE_KEY}' (TTL: {COOKIES_TTL}s).", file=sys.stderr)
-                    save_cookies_to_disk(current_cookies)
-                    browser = page.context.browser
-                    await browser_pool_manager.mark_authenticated(browser)
-                else:
-                    print("No relevant cookies found to save.", file=sys.stderr)
-            except Exception as e:
-                print(f"Warning: Failed to save cookies to cache: {e}", file=sys.stderr)
+        # Cookie'leri kaydet
+        try:
+            cdp_cookies = await browser.cookies()
+            if cdp_cookies:
+                cookies = []
+                for c in cdp_cookies:
+                    if 'dergipark' in c.get('domain', ''):
+                        cookies.append({
+                            'name': c.get('name', ''),
+                            'value': c.get('value', ''),
+                            'domain': c.get('domain', ''),
+                            'path': c.get('path', '/'),
+                        })
+                if cookies:
+                    cookie_cache[COOKIES_CACHE_KEY] = cookies
+                    save_cookies_to_disk(cookies)
+                    print(f"Saved {len(cookies)} cookies.", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: Cookie save error: {e}", file=sys.stderr)
 
         return article_links
 
     except Exception as e:
-        print(f"Error in get_article_links_with_cache: {e}\n{traceback.format_exc()}", file=sys.stderr)
-        raise RuntimeError(f"Link fetching/processing failed: {e}")
+        print(f"browser-use scraping error: {e}\n{traceback.format_exc()}", file=sys.stderr)
+        raise RuntimeError(f"Scraping failed: {e}")
+    finally:
+        if browser:
+            try:
+                await browser.stop()
+                print("browser-use stopped.", file=sys.stderr)
+            except Exception:
+                pass
+
+
+async def solve_captcha_with_capsolver_browser_use(browser: BrowserUseBrowser, page) -> bool:
+    """CapSolver ile CAPTCHA çözer (browser-use page için)."""
+    print("Solving CAPTCHA with CapSolver...", file=sys.stderr)
+
+    if not CAPSOLVER_API_KEY:
+        print("Error: CAPSOLVER_API_KEY not set.", file=sys.stderr)
+        return False
+
+    try:
+        # Sitekey ve URL al
+        page_url = await page.evaluate("() => window.location.href")
+        page_content = await page.evaluate("() => document.documentElement.outerHTML")
+
+        # Turnstile sitekey bul
+        sitekey_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', page_content)
+        if not sitekey_match:
+            print("No sitekey found.", file=sys.stderr)
+            return False
+
+        site_key = sitekey_match.group(1)
+        print(f"Sitekey: {site_key}", file=sys.stderr)
+
+        # CAPTCHA türünü belirle
+        is_turnstile = 'cf-turnstile' in page_content or 'challenges.cloudflare.com' in page_content
+        task_type = "AntiTurnstileTaskProxyLess" if is_turnstile else "ReCaptchaV2TaskProxyLess"
+        print(f"CAPTCHA type: {'Turnstile' if is_turnstile else 'reCAPTCHA v2'}", file=sys.stderr)
+
+        # CapSolver'a task gönder
+        async with httpx.AsyncClient(timeout=120) as client:
+            create_payload = {
+                "clientKey": CAPSOLVER_API_KEY,
+                "task": {
+                    "type": task_type,
+                    "websiteURL": page_url,
+                    "websiteKey": site_key,
+                }
+            }
+            resp = await client.post(CAPSOLVER_CREATE_TASK_URL, json=create_payload)
+            result = resp.json()
+
+            if result.get("errorId") != 0:
+                print(f"CapSolver create error: {result}", file=sys.stderr)
+                return False
+
+            task_id = result.get("taskId")
+            print(f"CapSolver task created: {task_id}", file=sys.stderr)
+
+            # Sonucu bekle
+            for _ in range(60):
+                await asyncio.sleep(2)
+                get_payload = {"clientKey": CAPSOLVER_API_KEY, "taskId": task_id}
+                resp = await client.post(CAPSOLVER_GET_RESULT_URL, json=get_payload)
+                result = resp.json()
+
+                if result.get("status") == "ready":
+                    token = result.get("solution", {}).get("token")
+                    if token:
+                        print("CapSolver token received.", file=sys.stderr)
+
+                        # Token'ı inject et
+                        if is_turnstile:
+                            await page.evaluate(f"""() => {{
+                                const input = document.querySelector('[name="cf-turnstile-response"]');
+                                if (input) input.value = "{token}";
+                                const hidden = document.querySelector('input[name="cf-turnstile-response"]');
+                                if (hidden) hidden.value = "{token}";
+                            }}""")
+                        else:
+                            await page.evaluate(f"""() => {{
+                                document.querySelector('#g-recaptcha-response').value = "{token}";
+                            }}""")
+
+                        await asyncio.sleep(2)
+
+                        # Submit butonuna tıkla
+                        await page.evaluate("""() => {
+                            const btn = document.querySelector('form[name="search_verification"] button[type="submit"]');
+                            if (btn) {
+                                btn.classList.remove('kt-hidden');
+                                btn.style.display = 'block';
+                                btn.disabled = false;
+                                btn.click();
+                            }
+                        }""")
+
+                        await asyncio.sleep(3)
+
+                        # Başarılı mı?
+                        new_url = await page.evaluate("() => window.location.href")
+                        if "verification" not in new_url:
+                            print("CapSolver CAPTCHA solved!", file=sys.stderr)
+                            return True
+                        else:
+                            print("CapSolver: still on verification page.", file=sys.stderr)
+                            return False
+
+                elif result.get("status") == "failed":
+                    print(f"CapSolver task failed: {result}", file=sys.stderr)
+                    return False
+
+            print("CapSolver timeout.", file=sys.stderr)
+            return False
+
+    except Exception as e:
+        print(f"CapSolver error: {e}", file=sys.stderr)
+        return False
 
 
 # --- PDF to HTML Conversion ---
@@ -1000,6 +763,7 @@ async def search_articles_core(
 ) -> dict:
     """
     Core search function for DergiPark articles.
+    Uses browser-use for scraping (verify-lawyer pattern).
 
     Returns a dictionary with pagination info and articles list.
     """
@@ -1022,45 +786,7 @@ async def search_articles_core(
     page_size = 24
     print(f"Target DP URL: {target_search_url} | API Page: {api_page} | Size: {page_size}", file=sys.stderr)
 
-    browser = context = page = None
-    total_items_on_page = 0
-
     try:
-        # Get Browser from Pool
-        browser, context, page = await browser_pool_manager.get_browser_and_context()
-
-        # Attempt to Inject Cookies from Cache
-        try:
-            print(f"Checking in-memory cache for cookies: {COOKIES_CACHE_KEY}", file=sys.stderr)
-            saved_cookies = cookie_cache.get(COOKIES_CACHE_KEY)
-
-            if not saved_cookies:
-                print("Memory cache miss, checking disk...", file=sys.stderr)
-                saved_cookies = load_cookies_from_disk()
-                if saved_cookies:
-                    cookie_cache[COOKIES_CACHE_KEY] = saved_cookies
-
-            if saved_cookies:
-                required_keys = {'name', 'value', 'domain', 'path'}
-                valid_cookies = []
-                for c in saved_cookies:
-                    if required_keys.issubset(c.keys()):
-                        if 'expires' in c and isinstance(c['expires'], float):
-                            c['expires'] = int(c['expires'])
-                        if 'sameSite' in c and c['sameSite'] not in ['Strict', 'Lax', 'None']:
-                            del c['sameSite']
-                        valid_cookies.append(c)
-                if valid_cookies:
-                    print(f"Injecting {len(valid_cookies)} cookies from cache...", file=sys.stderr)
-                    await context.add_cookies(valid_cookies)
-                    print("Cookies injected.", file=sys.stderr)
-                else:
-                    print("No valid cookies found in cache.", file=sys.stderr)
-            else:
-                print("No saved cookies found in cache.", file=sys.stderr)
-        except Exception as e:
-            print(f"Warning: Cookie load/injection error from cache: {e}", file=sys.stderr)
-
         # Generate cache key
         cache_key_data = {
             'q': q,
@@ -1072,8 +798,8 @@ async def search_articles_core(
         sorted_items = tuple(sorted(cache_key_data.items()))
         links_cache_key = (sorted_items, dergipark_page)
 
-        # Get Article Links
-        full_link_list = await get_article_links_with_cache(page, target_search_url, links_cache_key)
+        # Get Article Links using browser-use
+        full_link_list = await scrape_article_links_browser_use(target_search_url, links_cache_key)
 
         # Process Results & Pagination
         total_items_on_page = len(full_link_list)
@@ -1097,8 +823,8 @@ async def search_articles_core(
         if not links_to_process:
             return {"pagination": pagination_info, "articles": []}
 
-        # Paralel Fetch - Performans iyileştirmesi
-        referer_url = page.url
+        # Paralel Fetch - httpx ile makale detaylarını çek
+        referer_url = target_search_url
         print(f"Paralel fetch başlıyor: {len(links_to_process)} makale (max_concurrent=3)...", file=sys.stderr)
 
         articles_details = await fetch_article_details_parallel(
@@ -1114,48 +840,3 @@ async def search_articles_core(
     except Exception as e:
         print(f"General search error: {e}\n{traceback.format_exc()}", file=sys.stderr)
         raise RuntimeError(f"Unexpected search error: {e}")
-    finally:
-        if context or page:
-            await close_context_and_page(context, page)
-
-
-# --- Get Article Details (Single Article) ---
-async def get_article_details_core(article_url: str) -> dict:
-    """
-    Fetches detailed information for a single article URL.
-
-    Returns a dictionary with article metadata.
-    """
-    if not article_url or not article_url.startswith("http"):
-        raise ValueError("Invalid or missing article URL.")
-
-    browser = context = page = None
-
-    try:
-        browser, context, page = await browser_pool_manager.get_browser_and_context()
-
-        result = await get_article_details_pw(page, article_url)
-
-        details = result.get('details', {})
-        pdf_url = result.get('pdf_url')
-        indices = result.get('indices', '')
-
-        if pdf_url:
-            full_pdf_url = f"https://dergipark.org.tr{pdf_url}" if pdf_url.startswith('/') else pdf_url
-        else:
-            full_pdf_url = None
-
-        return {
-            'url': article_url,
-            'error': details.get('error'),
-            'details': details if not details.get('error') else None,
-            'indices': indices,
-            'pdf_url': full_pdf_url
-        }
-
-    except Exception as e:
-        print(f"Error fetching article details: {e}", file=sys.stderr)
-        raise RuntimeError(f"Failed to fetch article details: {e}")
-    finally:
-        if context or page:
-            await close_context_and_page(context, page)
