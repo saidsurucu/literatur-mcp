@@ -780,8 +780,7 @@ async def pdf_to_html_core(pdf_url: str) -> str:
 # --- Core Search Function ---
 async def search_articles_core(
     q: Optional[str] = None,
-    dergipark_page: int = 1,
-    api_page: int = 1,
+    page: int = 1,
     sort_by: Optional[Literal["newest", "oldest"]] = None,
     article_type: Optional[str] = None,
     publication_year: Optional[str] = None,
@@ -789,7 +788,7 @@ async def search_articles_core(
 ) -> dict:
     """
     Core search function for DergiPark articles.
-    Uses browser-use for scraping (verify-lawyer pattern).
+    Uses browser-use for scraping.
 
     Returns a dictionary with pagination info and articles list.
     """
@@ -799,8 +798,8 @@ async def search_articles_core(
 
     query_params['q'] = q if q else '*'
     query_params['section'] = 'article'
-    if dergipark_page > 1:
-        query_params['page'] = dergipark_page
+    if page > 1:
+        query_params['page'] = page
     if article_type:
         query_params['filter[article_type][]'] = article_type
     if sort_by:
@@ -809,58 +808,48 @@ async def search_articles_core(
         query_params['filter[publication_year][]'] = publication_year
 
     target_search_url = f"{base_url}?{urllib.parse.urlencode(query_params, quote_via=urllib.parse.quote)}"
-    page_size = 24
-    print(f"Target DP URL: {target_search_url} | API Page: {api_page} | Size: {page_size}", file=sys.stderr)
+    print(f"Target DP URL: {target_search_url} | Page: {page}", file=sys.stderr)
 
     try:
         # Generate cache key
         cache_key_data = {
             'q': q,
-            'dergipark_page': dergipark_page,
+            'page': page,
             'sort_by': sort_by,
             'article_type': article_type,
             'publication_year': publication_year,
         }
         sorted_items = tuple(sorted(cache_key_data.items()))
-        links_cache_key = (sorted_items, dergipark_page)
+        links_cache_key = (sorted_items, page)
 
         # Get Article Links using browser-use
         full_link_list = await scrape_article_links_browser_use(target_search_url, links_cache_key)
 
         # Process Results & Pagination
-        total_items_on_page = len(full_link_list)
-        total_api_pages = math.ceil(total_items_on_page / page_size) if total_items_on_page > 0 else 0
+        total_items = len(full_link_list)
         pagination_info = {
-            "api_page": api_page,
-            "page_size": page_size,
-            "total_items_on_dergipark_page": total_items_on_page,
-            "total_api_pages_for_dergipark_page": total_api_pages
+            "page": page,
+            "per_page": 24,
+            "count": total_items
         }
 
-        if total_items_on_page == 0:
+        if total_items == 0:
             return {"pagination": pagination_info, "articles": []}
 
-        # Calculate slice
-        offset = (api_page - 1) * page_size
-        limit = page_size
-        links_to_process = full_link_list[offset:offset + limit]
-        print(f"Links: Total={total_items_on_page}, Slice={len(links_to_process)} (API Page {api_page}/{total_api_pages})", file=sys.stderr)
-
-        if not links_to_process:
-            return {"pagination": pagination_info, "articles": []}
+        print(f"Found {total_items} article links", file=sys.stderr)
 
         # Paralel Fetch - httpx ile makale detaylarını çek
         referer_url = target_search_url
-        print(f"Paralel fetch başlıyor: {len(links_to_process)} makale (max_concurrent=3)...", file=sys.stderr)
+        print(f"Fetching {total_items} articles (max_concurrent=3)...", file=sys.stderr)
 
         articles_details = await fetch_article_details_parallel(
-            links_to_process=links_to_process,
+            links_to_process=full_link_list,
             referer_url=referer_url,
             index_filter=index_filter,
             max_concurrent=3
         )
 
-        print(f"Paralel fetch tamamlandı: {len(articles_details)} makale döndü", file=sys.stderr)
+        print(f"Fetch complete: {len(articles_details)} articles", file=sys.stderr)
         return {"pagination": pagination_info, "articles": articles_details}
 
     except Exception as e:

@@ -64,10 +64,9 @@ mcp = FastMCP(
 @mcp.tool
 async def search_articles(
     query: Annotated[str, Field(description="Search query (e.g., 'artificial intelligence', 'sociology'). Leave empty to search all articles.")] = "",
-    dergipark_page: Annotated[int, Field(ge=1, description="DergiPark page number (default: 1)")] = 1,
-    page: Annotated[int, Field(ge=1, description="API pagination (24 articles per page, default: 1)")] = 1,
+    page: Annotated[int, Field(ge=1, description="Page number (24 articles per page, default: 1)")] = 1,
     sort: Annotated[Optional[Literal["newest", "oldest"]], Field(description="Sort order: 'newest' or 'oldest'")] = None,
-    article_type: Annotated[Optional[str], Field(description="Article type code. 1=Image Presentation, 2=Technical Brief, 3=Dissertation, 4=Photo-Quiz, 5=Clinical Research, 6=Monograph, 7=Short Report, 8=Systematic Reviews and Meta Analysis, 9=Interview, 10=Review Article, 11=Discussion, 23=Autobiography, 24=Opinion Letter, 25=Teaching Practice, 26=Theoretical Article, 27=Opinion Article, 29=Letter, 30=Retraction, 31=Research Note, 32=Obituary, 33=Play Review, 34=Protocol Article, 35=Review Symposium, 36=Doctoral Thesis Review, 54=Research Article, 55=Case Report, 56=Review, 57=Translation, 58=Conference Paper, 59=Short Communication, 60=Letter to Editor, 61=Note, 62=Meeting Abstract, 63=Legislation Review, 64=Decision Review, 65=Book Review, 66=Erratum, 67=Editorial, 68=Biography, 69=Bibliography, 70=News, 71=Report, 72=Art and Literature, 73=Other")] = None,
+    article_type: Annotated[Optional[str], Field(description="Article type code. 54=Research Article, 55=Case Report, 56=Review, 58=Conference Paper, 65=Book Review, 10=Review Article")] = None,
     year: Annotated[Optional[str], Field(description="Publication year filter (e.g., '2024', '2023')")] = None,
     index_filter: Annotated[Optional[Literal["tr_dizin_icerenler", "bos_olmayanlar", "hepsi"]], Field(description="Index filter: 'tr_dizin_icerenler' (TR Index only), 'bos_olmayanlar' (has any index), 'hepsi' (all)")] = "hepsi",
     ctx: Context = None,
@@ -75,23 +74,20 @@ async def search_articles(
     """
     Search Turkish academic journals on DergiPark.
 
-    Returns paginated results with 24 articles per page. Each article includes
-    title, authors, abstract, keywords, DOI, indexes, and PDF link.
+    Returns 24 articles per page with title, authors, abstract, keywords, DOI, indexes, and PDF link.
 
     Examples:
-    - General search: search_articles(query="machine learning")
-    - Year filtered: search_articles(query="education", year="2024")
-    - Latest first: search_articles(query="health", sort="newest")
-    - TR Index only: search_articles(query="economics", index_filter="tr_dizin_icerenler")
+    - search_articles(query="machine learning")
+    - search_articles(query="education", page=2)
+    - search_articles(query="health", sort="newest")
     """
     if ctx:
-        await ctx.info(f"Searching DergiPark: '{query or '*'}'")
+        await ctx.info(f"Searching DergiPark: '{query or '*'}' (page {page})")
 
     try:
         result = await search_articles_core(
             q=query or None,
-            dergipark_page=dergipark_page,
-            api_page=page,
+            page=page,
             sort_by=sort,
             article_type=article_type,
             publication_year=year,
@@ -100,8 +96,7 @@ async def search_articles(
 
         if ctx:
             article_count = len(result.get("articles", []))
-            total = result.get("pagination", {}).get("total_items_on_dergipark_page", 0)
-            await ctx.info(f"Found: {article_count} articles (total: {total})")
+            await ctx.info(f"Found: {article_count} articles")
 
         return result
 
