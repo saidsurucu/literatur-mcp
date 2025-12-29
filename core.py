@@ -504,7 +504,7 @@ async def scrape_article_links_browser_use(search_url: str, cache_key: Any) -> L
 
         # JavaScript filtering bekle
         print("Waiting for JavaScript filtering...", file=sys.stderr)
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
 
         # Makale kartlarını çek
         print("Extracting article links...", file=sys.stderr)
