@@ -207,7 +207,15 @@ class BrowserPool:
         """Create a single browser instance."""
         browser = await self.playwright_instance.chromium.launch(
             headless=HEADLESS_MODE,
-            args=['--disable-dev-shm-usage', '--no-sandbox']
+            args=[
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-features=AutomationControlled',
+                '--disable-client-side-phishing-detection',
+                '--disable-component-update',
+                '--no-first-run',
+            ]
         )
         return browser
 
