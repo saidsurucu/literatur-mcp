@@ -27,9 +27,5 @@ ENV PATH=/home/pwuser/.local/bin:$PATH
 # 8. Adım: Redis Sunucusu Hakkında Not (Hatırlatma)
 # ÖNEMLİ: Redis sunucusu bu imajda DEĞİLDİR... (önceki gibi)
 
-# 9. Adım: Konteyner başladığında çalıştırılacak komut (Basitleştirilmiş)
-# Uvicorn artık PATH üzerinden bulunabilmeli.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
-
-# Alternatif CMD (Gunicorn ile tek worker):
-# CMD ["gunicorn", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000", "--timeout", "120", "--log-level", "info"]
+# 9. Adım: MCP ASGI uygulamasını başlat
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
