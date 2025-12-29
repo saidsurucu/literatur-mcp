@@ -571,29 +571,17 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
         return False
 
     try:
-        # Fetch Site Key
+        # Fetch Site Key from page source
         site_key = None
         page_url = page.url
-        print(f"Waiting for sitekey element on {page_url}...", file=sys.stderr)
-        try:
-            site_key_element = await page.wait_for_selector(site_key_element_selector, state="attached", timeout=15000)
-            site_key = await site_key_element.get_attribute('data-sitekey')
-            if not site_key:
-                raise ValueError("Sitekey attribute empty.")
-            print("Sitekey element found.", file=sys.stderr)
-        except (PlaywrightTimeoutError, ValueError, Exception) as e:
-            print(f"Error finding/getting sitekey: {e}", file=sys.stderr)
-            print("Trying fallback: extracting sitekey from page source...", file=sys.stderr)
-            page_content = await page.content()
-            sitekey_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', page_content)
-            if sitekey_match:
-                site_key = sitekey_match.group(1)
-                print(f"Sitekey found via regex: {site_key}", file=sys.stderr)
-            else:
-                print("Fallback failed: No sitekey found in page source.", file=sys.stderr)
-                return False
-
-        print(f"Sitekey: {site_key}, URL: {page_url}", file=sys.stderr)
+        page_content = await page.content()
+        sitekey_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', page_content)
+        if sitekey_match:
+            site_key = sitekey_match.group(1)
+            print(f"Sitekey: {site_key}, URL: {page_url}", file=sys.stderr)
+        else:
+            print("No sitekey found in page source.", file=sys.stderr)
+            return False
 
         # Determine CAPTCHA Type
         if site_key.startswith("0x4"):
