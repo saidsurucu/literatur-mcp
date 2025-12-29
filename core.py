@@ -163,7 +163,7 @@ async def fetch_indices_async(journal_url_base: str) -> str:
         return ''
     try:
         index_url = f"{journal_url_base.rstrip('/')}/indexes"
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
             response = await client.get(index_url)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html5lib')
@@ -404,7 +404,7 @@ async def fetch_article_details_parallel(
         'Accept': 'text/html,application/xhtml+xml',
         'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
     }
-    async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
+    async with httpx.AsyncClient(headers=headers, follow_redirects=True, verify=False) as client:
         tasks = [fetch_single(link, client) for link in links_to_process]
         all_results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -445,7 +445,7 @@ async def get_article_references_core(article_url: str) -> dict:
     }
 
     try:
-        async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=headers, follow_redirects=True, verify=False) as client:
             response = await client.get(article_url, timeout=30.0)
             response.raise_for_status()
             html_content = response.text
@@ -911,7 +911,7 @@ async def pdf_to_html_core(pdf_url: str) -> str:
 
     tmp_name = None
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0), follow_redirects=True, verify=False) as client:
             print(f"Downloading PDF from: {pdf_url}", file=sys.stderr)
             response = await client.get(pdf_url)
             response.raise_for_status()
