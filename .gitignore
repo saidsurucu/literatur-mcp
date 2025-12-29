@@ -160,7 +160,9 @@ cython_debug/
 #.idea/
 .DS_Store
 uv.lock
-test.py
+test*.py
+vercel.json
+modal_app.py
 .python-version
 *.png
 hello.py
