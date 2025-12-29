@@ -2,6 +2,8 @@
 
 ## Word'den UDF'ye profesyonel dönüşüm için yeni uygulamam [udfcevir.com](https://udfcevir.com) adresinde!
 
+![örnek](./ornek.png)
+
 Bu proje, [DergiPark](https://dergipark.org.tr) üzerinden Türk akademik dergi makalelerine erişimi kolaylaştıran bir [FastMCP](https://gofastmcp.com/) sunucusu oluşturur. Bu sayede, makale arama, PDF dönüştürme ve referans çekme işlemleri, Model Context Protocol (MCP) destekleyen LLM (Büyük Dil Modeli) uygulamaları (örneğin Claude Desktop veya [5ire](https://5ire.app)) ve diğer istemciler tarafından araç (tool) olarak kullanılabilir hale gelir.
 
 ---
