@@ -17,7 +17,7 @@ Bu proje, [DergiPark](https://dergipark.org.tr) üzerinden Türk akademik dergi 
 1. **Claude Desktop'ı açın**
 2. **Settings → Connectors → Add Custom Connector**
 3. **Bilgileri girin:**
-   - **Name:** `DergiPark MCP`
+   - **Name:** `Literatür MCP`
    - **URL:** `https://literatur-mcp.surucu.dev/mcp`
 4. **Add** butonuna tıklayın
 5. **Hemen kullanmaya başlayın!** 🎉
@@ -33,7 +33,7 @@ Bu proje, [DergiPark](https://dergipark.org.tr) üzerinden Türk akademik dergi 
 ```json
 {
   "mcpServers": {
-    "dergipark-mcp": {
+    "literatur-mcp": {
       "serverUrl": "https://literatur-mcp.surucu.dev/mcp/",
       "headers": {
         "Content-Type": "application/json"
@@ -65,15 +65,15 @@ Bu proje, [DergiPark](https://dergipark.org.tr) üzerinden Türk akademik dergi 
 
 Bu bölüm, DergiPark MCP aracını 5ire gibi Claude Desktop dışındaki MCP istemcileriyle kullanmak isteyenler içindir.
 
-* **Python Kurulumu:** Sisteminizde Python 3.10 veya üzeri kurulu olmalıdır. Kurulum sırasında "**Add Python to PATH**" (Python'ı PATH'e ekle) seçeneğini işaretlemeyi unutmayın. [Buradan](https://www.python.org/downloads/) indirebilirsiniz.
+* **Python Kurulumu:** Sisteminizde Python 3.11 veya üzeri kurulu olmalıdır. Kurulum sırasında "**Add Python to PATH**" (Python'ı PATH'e ekle) seçeneğini işaretlemeyi unutmayın. [Buradan](https://www.python.org/downloads/) indirebilirsiniz.
 * **`uv` Kurulumu:**
     * **Windows Kullanıcıları (PowerShell):** `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
     * **Mac/Linux Kullanıcıları (Terminal):** `curl -LsSf https://astral.sh/uv/install.sh | sh`
 * İşletim sisteminize uygun [5ire](https://5ire.app) MCP istemcisini indirip kurun.
 * 5ire'ı açın. **Workspace -> Providers** menüsünden kullanmak istediğiniz LLM servisinin API anahtarını girin.
 * **Tools** menüsüne girin. **+Local** veya **New** yazan butona basın.
-    * **Tool Key:** `dergipark-mcp`
-    * **Name:** `DergiPark MCP`
+    * **Tool Key:** `literatur-mcp`
+    * **Name:** `Literatür MCP`
     * **Command:**
         ```
         uvx --from git+https://github.com/saidsurucu/literatur-mcp literatur-mcp
@@ -99,7 +99,7 @@ Bu bölüm, DergiPark MCP aracını 5ire gibi Claude Desktop dışındaki MCP is
     ```json
     {
       "mcpServers": {
-        "DergiPark MCP": {
+        "Literatür MCP": {
           "command": "uv",
           "args": ["run", "python", "mcp_server.py"],
           "cwd": "/path/to/literatur-mcp/dergipark-api",
