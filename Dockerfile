@@ -6,17 +6,18 @@ WORKDIR /app
 # uv kur
 RUN pip install uv
 
-# Uygulama dosyalarını kopyala
+# Uygulama dosyalarını kopyala ve sahipliği ayarla
 COPY --chown=pwuser:pwuser . .
+
+# /app dizininin sahipliğini pwuser'a ver
+RUN chown -R pwuser:pwuser /app
 
 USER pwuser
 
-# Bağımlılıkları uv ile kur
-RUN uv sync
+# Bağımlılıkları uv ile kur (mevcut Python'u kullan)
+RUN uv sync --python /usr/bin/python3
 
 EXPOSE 8000
 
-ENV PATH=/home/pwuser/.local/bin:$PATH
-
 # uv run ile başlat
-CMD ["uv", "run", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "--python", "/usr/bin/python3", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
