@@ -622,6 +622,8 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
             # Poll for Result
             start_time = time.time()
             timeout_seconds = 180
+            fail_count = 0
+            max_failures = 3
             while time.time() - start_time < timeout_seconds:
                 await asyncio.sleep(6)
                 print(f"Polling CapSolver (ID: {task_id})...", file=sys.stderr)
@@ -630,10 +632,15 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
                     get_response = await client.post(CAPSOLVER_GET_RESULT_URL, json=result_payload, timeout=15)
                     get_response.raise_for_status()
                     get_result = get_response.json()
-                    if get_result.get("errorId", 0) != 0:
-                        raise ValueError(f"API Error Poll: {get_result}")
+                    error_code = get_result.get("errorCode", "")
                     status = get_result.get("status")
                     print(f"Task status: {status}", file=sys.stderr)
+
+                    # Definitively failed - don't retry
+                    if status in ["failed", "error"] or error_code == "ERROR_CAPTCHA_SOLVE_FAILED":
+                        print(f"CapSolver task definitively failed: {get_result.get('errorDescription', 'N/A')}", file=sys.stderr)
+                        break
+
                     if status == "ready":
                         solution = get_result.get("solution")
                         if solution:
@@ -641,12 +648,12 @@ async def solve_recaptcha_v2_capsolver_direct_async(page: Page) -> bool:
                         if captcha_token:
                             print("CapSolver solution received!", file=sys.stderr)
                             break
-                        else:
-                            raise ValueError("Task ready but no token.")
-                    elif status in ["failed", "error"]:
-                        raise ValueError(f"CapSolver task failed/errored: {get_result.get('errorDescription', 'N/A')}")
                 except Exception as e:
-                    print(f"Warning: Error Polling CapSolver Task (will retry): {e}", file=sys.stderr)
+                    fail_count += 1
+                    print(f"Warning: Error Polling CapSolver Task ({fail_count}/{max_failures}): {e}", file=sys.stderr)
+                    if fail_count >= max_failures:
+                        print("Max polling failures reached, giving up.", file=sys.stderr)
+                        break
                     await asyncio.sleep(5)
 
             if not captcha_token:
