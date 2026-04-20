@@ -593,7 +593,13 @@ async def solve_captcha_with_capsolver_browser_use(browser: BrowserUseBrowser, p
         # Turnstile sitekey bul
         sitekey_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', page_content)
         if not sitekey_match:
-            print("No sitekey found.", file=sys.stderr)
+            print("No sitekey found. HTML snippet (first 2KB):", file=sys.stderr)
+            print(page_content[:2000], file=sys.stderr)
+            print("--- HTML snippet end ---", file=sys.stderr)
+            # Turnstile iframe varsa src'sini de log'la
+            iframe_matches = re.findall(r'<iframe[^>]*src=["\']([^"\']+)["\']', page_content)
+            if iframe_matches:
+                print(f"Iframes found: {iframe_matches}", file=sys.stderr)
             return False
 
         site_key = sitekey_match.group(1)
