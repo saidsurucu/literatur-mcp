@@ -304,32 +304,58 @@ async def get_article_references_core(article_url: str) -> dict:
 # --- Scrapling-Based Scraping (StealthyFetcher with auto Cloudflare/Turnstile bypass) ---
 
 async def _force_submit_verification(page) -> None:
-    """After Scrapling clicks Turnstile, DergiPark's hidden submit button doesn't always
-    auto-fire (especially on Linux/Docker fingerprints). Click it ourselves if we're
-    still on /verification once Turnstile has settled."""
+    """After Scrapling clicks the Turnstile checkbox, DergiPark's hidden submit button
+    doesn't always auto-fire (especially on Linux/Docker fingerprints). Wait for the
+    cf-turnstile-response token, then click submit ourselves if still on /verification."""
+    print("[force_submit] page_action invoked", file=sys.stderr)
     try:
-        await page.wait_for_timeout(2000)
-        if "verification" not in page.url:
+        url = page.url
+        print(f"[force_submit] url={url}", file=sys.stderr)
+        if "verification" not in url:
+            print("[force_submit] not on verification, skipping", file=sys.stderr)
             return
-        await page.evaluate("""() => {
+
+        # Poll up to 30s for Cloudflare to inject the Turnstile response token
+        token_len = 0
+        for i in range(30):
+            await page.wait_for_timeout(1000)
+            token_len = await page.evaluate("""() => {
+                const el = document.querySelector('[name="cf-turnstile-response"]');
+                return el && el.value ? el.value.length : 0;
+            }""")
+            if token_len > 10:
+                print(f"[force_submit] token present (len={token_len}) after {i+1}s", file=sys.stderr)
+                break
+            if "verification" not in page.url:
+                print("[force_submit] navigated away while waiting for token", file=sys.stderr)
+                return
+        else:
+            print(f"[force_submit] timed out waiting for token (last len={token_len})", file=sys.stderr)
+
+        # Force-show & click the submit button
+        clicked = await page.evaluate("""() => {
             const form = document.querySelector('form[name="search_verification"]');
-            if (!form) return;
+            if (!form) return 'no-form';
             const btn = form.querySelector('button[type="submit"]');
             if (btn) {
                 btn.classList.remove('kt-hidden');
                 btn.style.display = 'block';
                 btn.disabled = false;
                 btn.click();
-            } else {
-                form.submit();
+                return 'clicked-button';
             }
+            form.submit();
+            return 'submitted-form';
         }""")
+        print(f"[force_submit] submit result: {clicked}", file=sys.stderr)
+
         try:
-            await page.wait_for_url(lambda u: "verification" not in u, timeout=15000)
+            await page.wait_for_url(lambda u: "verification" not in u, timeout=20000)
+            print(f"[force_submit] navigated to {page.url}", file=sys.stderr)
         except Exception:
-            pass
+            print(f"[force_submit] still on {page.url} after submit", file=sys.stderr)
     except Exception as e:
-        print(f"_force_submit_verification error: {e}", file=sys.stderr)
+        print(f"[force_submit] error: {e}", file=sys.stderr)
 
 
 async def scrape_article_links(search_url: str, cache_key: Any) -> List[Dict[str, str]]:
