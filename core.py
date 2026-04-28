@@ -303,6 +303,35 @@ async def get_article_references_core(article_url: str) -> dict:
 
 # --- Scrapling-Based Scraping (StealthyFetcher with auto Cloudflare/Turnstile bypass) ---
 
+async def _force_submit_verification(page) -> None:
+    """After Scrapling clicks Turnstile, DergiPark's hidden submit button doesn't always
+    auto-fire (especially on Linux/Docker fingerprints). Click it ourselves if we're
+    still on /verification once Turnstile has settled."""
+    try:
+        await page.wait_for_timeout(2000)
+        if "verification" not in page.url:
+            return
+        await page.evaluate("""() => {
+            const form = document.querySelector('form[name="search_verification"]');
+            if (!form) return;
+            const btn = form.querySelector('button[type="submit"]');
+            if (btn) {
+                btn.classList.remove('kt-hidden');
+                btn.style.display = 'block';
+                btn.disabled = false;
+                btn.click();
+            } else {
+                form.submit();
+            }
+        }""")
+        try:
+            await page.wait_for_url(lambda u: "verification" not in u, timeout=15000)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"_force_submit_verification error: {e}", file=sys.stderr)
+
+
 async def scrape_article_links(search_url: str, cache_key: Any) -> List[Dict[str, str]]:
     """Fetch article cards from a DergiPark search URL using Scrapling's StealthyFetcher.
 
@@ -323,6 +352,7 @@ async def scrape_article_links(search_url: str, cache_key: Any) -> List[Dict[str
             page = await StealthyFetcher.async_fetch(
                 search_url,
                 solve_cloudflare=True,
+                page_action=_force_submit_verification,
                 network_idle=True,
                 wait_selector="div.card.article-card.dp-card-outline, div.alert.alert-warning",
                 timeout=180000,
