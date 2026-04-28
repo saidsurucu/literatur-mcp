@@ -9,6 +9,7 @@ tarafından kullanılabilir.
 
 import asyncio
 import html
+import json
 import os
 import sys
 import tempfile
@@ -28,6 +29,11 @@ from scrapling.fetchers import StealthyFetcher
 ARTICLE_LINKS_TTL = 600
 MAX_LINK_LISTS = 100
 links_cache = TTLCache(maxsize=MAX_LINK_LISTS, ttl=ARTICLE_LINKS_TTL)
+
+# CapSolver (token-only fallback when Cloudflare won't serve us the Turnstile iframe)
+CAPSOLVER_API_KEY = os.getenv("CAPSOLVER_API_KEY", "")
+CAPSOLVER_CREATE_URL = "https://api.capsolver.com/createTask"
+CAPSOLVER_RESULT_URL = "https://api.capsolver.com/getTaskResult"
 
 # Mistral OCR Ayarları (PDF fallback)
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
@@ -303,85 +309,108 @@ async def get_article_references_core(article_url: str) -> dict:
 
 # --- Scrapling-Based Scraping (StealthyFetcher with auto Cloudflare/Turnstile bypass) ---
 
+async def _capsolver_turnstile(site_url: str, site_key: str) -> Optional[str]:
+    """Resolve a Turnstile token via CapSolver. Returns the token or None on failure."""
+    if not CAPSOLVER_API_KEY:
+        print("[capsolver] CAPSOLVER_API_KEY missing", file=sys.stderr)
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            create = await client.post(CAPSOLVER_CREATE_URL, json={
+                "clientKey": CAPSOLVER_API_KEY,
+                "task": {
+                    "type": "AntiTurnstileTaskProxyLess",
+                    "websiteURL": site_url,
+                    "websiteKey": site_key,
+                },
+            })
+            create_data = create.json()
+            if create_data.get("errorId") != 0:
+                print(f"[capsolver] create error: {create_data}", file=sys.stderr)
+                return None
+            task_id = create_data.get("taskId")
+            print(f"[capsolver] task {task_id} created", file=sys.stderr)
+            for _ in range(60):
+                await asyncio.sleep(2)
+                resp = await client.post(CAPSOLVER_RESULT_URL, json={
+                    "clientKey": CAPSOLVER_API_KEY,
+                    "taskId": task_id,
+                })
+                data = resp.json()
+                status = data.get("status")
+                if status == "ready":
+                    token = (data.get("solution") or {}).get("token")
+                    if token:
+                        print(f"[capsolver] token received (len={len(token)})", file=sys.stderr)
+                        return token
+                    print(f"[capsolver] ready but no token: {data}", file=sys.stderr)
+                    return None
+                if status == "failed":
+                    print(f"[capsolver] task failed: {data}", file=sys.stderr)
+                    return None
+            print("[capsolver] polling timed out", file=sys.stderr)
+            return None
+    except Exception as e:
+        print(f"[capsolver] exception: {e}", file=sys.stderr)
+        return None
+
+
 async def _force_submit_verification(page) -> None:
-    """Diagnostic + manual submit fallback for DergiPark's verification page."""
+    """Cloudflare won't serve the Turnstile iframe to our datacenter Chromium, so the
+    `cf-turnstile-response` input never gets filled. Resolve a token via CapSolver, set
+    it on the input, and call DergiPark's `turnstileCallbackSuccess` — which submits
+    the form for us."""
     print("[force_submit] page_action invoked", file=sys.stderr)
     try:
         url = page.url
         print(f"[force_submit] url={url}", file=sys.stderr)
         if "verification" not in url:
-            print("[force_submit] not on verification, skipping", file=sys.stderr)
             return
 
-        # Diagnostic dump: every form input on the page (names, types, value lengths)
-        try:
-            inputs_info = await page.evaluate("""() => {
-                return Array.from(document.querySelectorAll('input')).map(i => ({
-                    name: i.name || null,
-                    type: i.type,
-                    id: i.id || null,
-                    valueLen: (i.value || '').length,
-                }));
-            }""")
-            print(f"[force_submit] inputs: {inputs_info}", file=sys.stderr)
-            iframe_info = await page.evaluate("""() => {
-                return Array.from(document.querySelectorAll('iframe')).map(f => ({
-                    src: f.src || null,
-                    id: f.id || null,
-                    name: f.name || null,
-                }));
-            }""")
-            print(f"[force_submit] iframes: {iframe_info}", file=sys.stderr)
-            ts_info = await page.evaluate("""() => {
-                const el = document.querySelector('.cf-turnstile, [data-sitekey], [class*="turnstile"]');
-                if (!el) return null;
-                return {tag: el.tagName, sitekey: el.getAttribute('data-sitekey'), html: el.outerHTML.slice(0, 400)};
-            }""")
-            print(f"[force_submit] turnstile container: {ts_info}", file=sys.stderr)
-        except Exception as e:
-            print(f"[force_submit] diagnostic error: {e}", file=sys.stderr)
-
-        # Poll up to 30s for any token-bearing input to fill in
-        token_len = 0
-        for i in range(30):
-            await page.wait_for_timeout(1000)
-            token_len = await page.evaluate("""() => {
-                for (const i of document.querySelectorAll('input[type="hidden"], input[name*="turnstile"], input[name*="captcha"], input[name*="token"]')) {
-                    if (i.value && i.value.length > 10) return i.value.length;
-                }
-                return 0;
-            }""")
-            if token_len > 10:
-                print(f"[force_submit] token-shaped value present (len={token_len}) after {i+1}s", file=sys.stderr)
-                break
-            if "verification" not in page.url:
-                print("[force_submit] navigated away while waiting for token", file=sys.stderr)
-                return
-        else:
-            print(f"[force_submit] no token-shaped value appeared after 30s", file=sys.stderr)
-
-        # Submit anyway in case the form accepts an empty token (browsers sometimes do)
-        clicked = await page.evaluate("""() => {
-            const form = document.querySelector('form[name="search_verification"]') || document.querySelector('form');
-            if (!form) return 'no-form';
-            const btn = form.querySelector('button[type="submit"]');
-            if (btn) {
-                btn.classList.remove('kt-hidden');
-                btn.style.display = 'block';
-                btn.disabled = false;
-                btn.click();
-                return 'clicked-button';
-            }
-            form.submit();
-            return 'submitted-form';
+        sitekey = await page.evaluate("""() => {
+            const el = document.querySelector('.cf-turnstile, [data-sitekey]');
+            return el ? el.getAttribute('data-sitekey') : null;
         }""")
-        print(f"[force_submit] submit result: {clicked}", file=sys.stderr)
+        if not sitekey:
+            print("[force_submit] no sitekey found, cannot solve", file=sys.stderr)
+            return
+        print(f"[force_submit] sitekey={sitekey}", file=sys.stderr)
+
+        token = await _capsolver_turnstile(url, sitekey)
+        if not token:
+            print("[force_submit] no token obtained, aborting", file=sys.stderr)
+            return
+
+        injected = await page.evaluate(f"""() => {{
+            const inputs = document.querySelectorAll('input[name="cf-turnstile-response"]');
+            inputs.forEach(i => {{ i.value = {json.dumps(token)}; }});
+            const cb = window.turnstileCallbackSuccess;
+            if (typeof cb === 'function') {{
+                try {{ cb({json.dumps(token)}); return 'callback-fired'; }}
+                catch (e) {{ return 'callback-error: ' + e.message; }}
+            }}
+            const form = document.querySelector('form[name="search_verification"]');
+            if (form) {{
+                const btn = form.querySelector('button[type="submit"]');
+                if (btn) {{
+                    btn.classList.remove('kt-hidden');
+                    btn.style.display = 'block';
+                    btn.disabled = false;
+                    btn.click();
+                    return 'submit-clicked';
+                }}
+                form.submit();
+                return 'form-submitted';
+            }}
+            return 'no-form';
+        }}""")
+        print(f"[force_submit] injected: {injected}", file=sys.stderr)
 
         try:
             await page.wait_for_url(lambda u: "verification" not in u, timeout=20000)
             print(f"[force_submit] navigated to {page.url}", file=sys.stderr)
         except Exception:
-            print(f"[force_submit] still on {page.url} after submit", file=sys.stderr)
+            print(f"[force_submit] still on {page.url} after callback", file=sys.stderr)
     except Exception as e:
         print(f"[force_submit] error: {e}", file=sys.stderr)
 
