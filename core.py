@@ -317,31 +317,35 @@ async def scrape_article_links(search_url: str, cache_key: Any) -> List[Dict[str
     print(f"Cache MISS: Fetching {search_url} via Scrapling StealthyFetcher", file=sys.stderr)
     page = None
     last_err: Optional[str] = None
-    for attempt in range(1, 4):
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
         try:
             page = await StealthyFetcher.async_fetch(
                 search_url,
                 solve_cloudflare=True,
                 network_idle=True,
-                timeout=120000,
+                wait_selector="div.card.article-card.dp-card-outline, div.alert.alert-warning",
+                timeout=180000,
             )
         except Exception as e:
             last_err = f"StealthyFetcher exception: {e}"
-            print(f"Attempt {attempt}/3 raised: {e}", file=sys.stderr)
+            print(f"Attempt {attempt}/{max_attempts} raised: {e}", file=sys.stderr)
             page = None
-            continue
-        if page.status != 200:
-            last_err = f"HTTP {page.status}"
-            print(f"Attempt {attempt}/3 returned {last_err}", file=sys.stderr)
-            continue
-        final_url = getattr(page, "url", "") or ""
-        if "verification" in final_url:
-            last_err = f"final URL still on /verification ({final_url})"
-            print(f"Attempt {attempt}/3 {last_err}", file=sys.stderr)
-            continue
-        break
+        else:
+            if page.status != 200:
+                last_err = f"HTTP {page.status}"
+                print(f"Attempt {attempt}/{max_attempts} returned {last_err}", file=sys.stderr)
+            else:
+                final_url = getattr(page, "url", "") or ""
+                if "verification" in final_url:
+                    last_err = f"final URL still on /verification ({final_url})"
+                    print(f"Attempt {attempt}/{max_attempts} {last_err}", file=sys.stderr)
+                else:
+                    break
+        if attempt < max_attempts:
+            await asyncio.sleep(2 + attempt)
     else:
-        raise RuntimeError(f"CAPTCHA bypass failed after 3 attempts: {last_err}")
+        raise RuntimeError(f"CAPTCHA bypass failed after {max_attempts} attempts: {last_err}")
 
     article_links: List[Dict[str, str]] = []
     for card in page.css("div.card.article-card.dp-card-outline"):
