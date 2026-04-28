@@ -11,9 +11,7 @@ Usage:
     fastmcp run mcp_server.py     # Production mode
 """
 
-import sys
 from typing import Optional, Literal, Annotated
-from contextlib import asynccontextmanager
 from fastmcp import FastMCP, Context
 from pydantic import Field
 
@@ -21,22 +19,7 @@ from core import (
     search_articles_core,
     pdf_to_html_core,
     get_article_references_core,
-    browser_manager,
 )
-
-
-# --- Lifespan Context Manager ---
-@asynccontextmanager
-async def lifespan(server: FastMCP):
-    """Manage browser-use lifecycle."""
-    print("=== MCP SERVER STARTUP ===", file=sys.stderr)
-    await browser_manager.initialize()
-    try:
-        yield {}
-    finally:
-        print("=== MCP SERVER SHUTDOWN ===", file=sys.stderr)
-        await browser_manager.cleanup()
-        print("=== CLEANUP COMPLETE ===", file=sys.stderr)
 
 
 # --- FastMCP Server Initialization ---
@@ -55,7 +38,6 @@ mcp = FastMCP(
 
     Note: Automatically handles CAPTCHA protection.
     """,
-    lifespan=lifespan,
 )
 
 

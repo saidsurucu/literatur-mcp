@@ -8,17 +8,15 @@ dependencies = [
     "fastmcp>=2.14.1",
     "aiofiles>=23.0.0",
     "beautifulsoup4>=4.11.0",
-    "browser-use==0.11.2",
     "cachetools>=5.0.0",
     "fastapi>=0.100.0",
     "html5lib>=1.1",
     "httpx>=0.25.0",
-    "playwright==1.51.0",
     "uvicorn[standard]>=0.23.0",
-    "capsolver>=1.0.7",
     "pydantic>=2.11.2",
     "pymupdf>=1.25.5",
     "mistralai>=1.9.11",
+    "scrapling[fetchers]>=0.3.7",
 ]
 
 [project.scripts]

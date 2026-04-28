@@ -9,18 +9,12 @@ tarafından kullanılabilir.
 
 import asyncio
 import html
-import json
-import math
 import os
-import pickle
-import random
 import sys
 import tempfile
 import traceback
 import urllib.parse
-import time
-import re
-from typing import List, Optional, Literal, Dict, Any, Tuple
+from typing import List, Optional, Literal, Dict, Any
 
 # --- Gerekli Kütüphaneler ---
 import httpx
@@ -28,74 +22,22 @@ from bs4 import BeautifulSoup
 from cachetools import TTLCache
 import fitz
 from mistralai import Mistral
-from browser_use import Browser as BrowserUseBrowser
+from scrapling.fetchers import StealthyFetcher
 
 # --- Configuration ---
-# Hafıza İçi Önbellek Ayarları
-COOKIES_TTL = 1800
-MAX_COOKIE_SETS = 10
 ARTICLE_LINKS_TTL = 600
 MAX_LINK_LISTS = 100
-cookie_cache = TTLCache(maxsize=MAX_COOKIE_SETS, ttl=COOKIES_TTL)
 links_cache = TTLCache(maxsize=MAX_LINK_LISTS, ttl=ARTICLE_LINKS_TTL)
-COOKIES_CACHE_KEY = "dergipark_scraper:session:last_cookies"
-COOKIES_FILE_PATH = "cookies_persistent.pkl"
-
-# CapSolver Ayarları
-CAPSOLVER_API_KEY = os.getenv("CAPSOLVER_API_KEY", "")
-CAPSOLVER_CREATE_TASK_URL = "https://api.capsolver.com/createTask"
-CAPSOLVER_GET_RESULT_URL = "https://api.capsolver.com/getTaskResult"
 
 # Mistral OCR Ayarları (PDF fallback)
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
-
-# Browser Ayarları (browser-use)
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-]
-HEADLESS_MODE = False
 
 # PDF Cache
 PDF_CACHE_TTL = int(os.getenv("PDF_CACHE_TTL", 86400))
 pdf_cache = TTLCache(maxsize=500, ttl=PDF_CACHE_TTL)
 
-# Browser Pool Configuration
-BROWSER_POOL_SIZE = 5  # Paralel işlem için artırıldı (eski: 2)
-
 
 # --- Helper Functions ---
-def save_cookies_to_disk(cookies):
-    """Save cookies to disk using pickle"""
-    try:
-        with open(COOKIES_FILE_PATH, 'wb') as f:
-            pickle.dump({'cookies': cookies, 'timestamp': time.time()}, f)
-        print(f"Cookies saved to disk: {COOKIES_FILE_PATH}", file=sys.stderr)
-    except Exception as e:
-        print(f"Failed to save cookies to disk: {e}", file=sys.stderr)
-
-
-def load_cookies_from_disk():
-    """Load cookies from disk if they exist and are fresh"""
-    try:
-        if not os.path.exists(COOKIES_FILE_PATH):
-            return None
-        with open(COOKIES_FILE_PATH, 'rb') as f:
-            data = pickle.load(f)
-        age = time.time() - data['timestamp']
-        if age > COOKIES_TTL:
-            print(f"Disk cookies expired (age: {age:.0f}s > {COOKIES_TTL}s)", file=sys.stderr)
-            os.remove(COOKIES_FILE_PATH)
-            return None
-        print(f"Loaded {len(data['cookies'])} cookies from disk (age: {age:.0f}s)", file=sys.stderr)
-        return data['cookies']
-    except Exception as e:
-        print(f"Failed to load cookies from disk: {e}", file=sys.stderr)
-        return None
-
-
 def truncate_text(text: str, word_limit: int) -> str:
     """Truncates text to a specified word limit."""
     if not text:
@@ -175,37 +117,6 @@ async def fetch_indices_async(journal_url_base: str) -> str:
     except Exception as e:
         print(f"Async index fetch failed for {journal_url_base}: {e}", file=sys.stderr)
         return ''
-
-
-# --- Browser-Use Manager ---
-class BrowserUseManager:
-    """Browser manager using browser-use library (verify-lawyer pattern)."""
-
-    def __init__(self):
-        self.lock = asyncio.Lock()
-        self._initialized = False
-
-    async def initialize(self):
-        """Initialize browser-use manager."""
-        print("=== BROWSER-USE MANAGER READY ===", file=sys.stderr)
-        self._initialized = True
-
-    async def create_browser(self) -> BrowserUseBrowser:
-        """Create a new browser-use instance with verify-lawyer parameters."""
-        browser = BrowserUseBrowser(
-            headless=False,
-            window_size={'width': 1, 'height': 1},
-            args=['--window-position=-2400,-2400']
-        )
-        return browser
-
-    async def cleanup(self):
-        """Cleanup (no-op for browser-use, each browser is closed after use)."""
-        print("Browser-use manager cleanup complete.", file=sys.stderr)
-
-
-# Global browser-use manager instance
-browser_manager = BrowserUseManager()
 
 
 async def fetch_article_details_parallel(
@@ -390,305 +301,64 @@ async def get_article_references_core(article_url: str) -> dict:
         }
 
 
-# --- browser-use Based Scraping (verify-lawyer pattern) ---
+# --- Scrapling-Based Scraping (StealthyFetcher with auto Cloudflare/Turnstile bypass) ---
 
-async def scrape_article_links_browser_use(search_url: str, cache_key: Any) -> List[Dict[str, str]]:
+async def scrape_article_links(search_url: str, cache_key: Any) -> List[Dict[str, str]]:
+    """Fetch article cards from a DergiPark search URL using Scrapling's StealthyFetcher.
+
+    Camoufox (stealth Firefox) handles fingerprinting; solve_cloudflare resolves the
+    embedded Turnstile that DergiPark serves on /tr/search/verification.
     """
-    browser-use ile DergiPark'tan makale linklerini çeker.
-    CAPTCHA varsa: 5s Turnstile auto-pass + CapSolver fallback.
-    verify-lawyer pattern'i ile birebir aynı parametreler.
-    """
-    # Check Cache first
-    try:
-        cached_data = links_cache.get(cache_key)
-        if cached_data is not None:
-            print(f"Cache HIT: Links {str(cache_key)[:100]}...", file=sys.stderr)
-            return cached_data
-    except Exception as e:
-        print(f"Warning: Links cache GET error: {e}", file=sys.stderr)
+    cached = links_cache.get(cache_key)
+    if cached is not None:
+        print(f"Cache HIT: Links {str(cache_key)[:100]}", file=sys.stderr)
+        return cached
 
-    print(f"Cache MISS: Fetching from DergiPark with browser-use...", file=sys.stderr)
-    browser = None
-    article_links = []
-
-    try:
-        # browser-use Browser (verify-lawyer ile birebir aynı parametreler)
-        browser = BrowserUseBrowser(
-            headless=False,
-            window_size={'width': 1, 'height': 1},
-            args=['--window-position=-2400,-2400']
-        )
-        await browser.start()
-        print("browser-use started.", file=sys.stderr)
-
-        # Cookie'leri yükle (önce cache, sonra disk)
-        cookies_to_load = cookie_cache.get(COOKIES_CACHE_KEY) or load_cookies_from_disk()
-
-        if cookies_to_load:
-            # Önce dergipark'a git (cookie set edebilmek için)
-            print("Loading cookies - navigating to dergipark first...", file=sys.stderr)
-            page = await browser.new_page("https://dergipark.org.tr")
-            await asyncio.sleep(1)
-
-            print(f"Loading {len(cookies_to_load)} cookies into browser...", file=sys.stderr)
-            try:
-                # JavaScript ile cookie'leri ekle
-                for cookie in cookies_to_load:
-                    name = cookie.get('name', '')
-                    value = cookie.get('value', '')
-                    if name and value:
-                        await page.evaluate(f"() => {{ document.cookie = '{name}={value}; path=/; domain=.dergipark.org.tr'; }}")
-                print("Cookies loaded successfully.", file=sys.stderr)
-            except Exception as e:
-                print(f"Warning: Failed to load cookies: {e}", file=sys.stderr)
-
-            # Aynı sayfada search URL'e git
-            print(f"Navigating to: {search_url}", file=sys.stderr)
-            await page.goto(search_url)
-            await asyncio.sleep(2)
-        else:
-            # Cookie yoksa direkt search sayfasına git
-            print(f"No cookies to load. Navigating to: {search_url}", file=sys.stderr)
-            page = await browser.new_page(search_url)
-            await asyncio.sleep(2)
-
-        # URL kontrolü - CAPTCHA sayfasında mıyız?
-        current_url = await page.evaluate("() => window.location.href")
-        print(f"Current URL: {current_url}", file=sys.stderr)
-
-        if "verification" in current_url:
-            print("CAPTCHA page detected. Trying Turnstile auto-pass...", file=sys.stderr)
-
-            # 5 saniye bekle - Turnstile auto-pass
-            await asyncio.sleep(5)
-
-            # Submit butonuna tıkla
-            await page.evaluate("""() => {
-                const btn = document.querySelector('form[name="search_verification"] button[type="submit"]');
-                if (btn) {
-                    btn.classList.remove('kt-hidden');
-                    btn.style.display = 'block';
-                    btn.disabled = false;
-                    btn.click();
-                }
-            }""")
-
-            # Navigation bekle
-            await asyncio.sleep(3)
-
-            # URL kontrolü
-            current_url = await page.evaluate("() => window.location.href")
-            print(f"URL after Turnstile attempt: {current_url}", file=sys.stderr)
-
-            if "verification" in current_url:
-                # Turnstile başarısız, CapSolver dene
-                print("Turnstile auto-pass failed, trying CapSolver...", file=sys.stderr)
-                captcha_solved = await solve_captcha_with_capsolver_browser_use(browser, page)
-                if not captcha_solved:
-                    raise RuntimeError("CAPTCHA solving failed (Turnstile + CapSolver).")
-                current_url = await page.evaluate("() => window.location.href")
-            else:
-                print("Turnstile auto-pass SUCCESS!", file=sys.stderr)
-
-        # Artık search sonuçları sayfasındayız
-        print(f"On results page: {current_url}", file=sys.stderr)
-
-        # Article section'a tıkla (eğer gerekiyorsa)
-        if "section=article" not in current_url:
-            print("Clicking on article section...", file=sys.stderr)
-            await page.evaluate("""() => {
-                const link = document.querySelector('a.search-section-link[href*="section=article"]');
-                if (link) link.click();
-            }""")
-            await asyncio.sleep(3)
-
-        # JavaScript filtering bekle
-        print("Waiting for JavaScript filtering...", file=sys.stderr)
-        await asyncio.sleep(5)
-
-        # Makale kartlarını çek
-        print("Extracting article links...", file=sys.stderr)
-        article_links_raw = await page.evaluate("""() => {
-            const cards = document.querySelectorAll('div.card.article-card.dp-card-outline');
-            const links = [];
-            cards.forEach(card => {
-                const a = card.querySelector('h5.card-title > a[href]');
-                if (a) {
-                    links.push({
-                        url: a.href,
-                        title: a.textContent.trim() || 'N/A'
-                    });
-                }
-            });
-            return links;
-        }""")
-
-        # browser-use page.evaluate JSON string dönüyor - parse et
-        if isinstance(article_links_raw, str):
-            try:
-                article_links = json.loads(article_links_raw)
-                print(f"Parsed JSON: {len(article_links)} article links.", file=sys.stderr)
-            except json.JSONDecodeError as e:
-                print(f"JSON parse error: {e}", file=sys.stderr)
-                article_links = []
-        else:
-            article_links = article_links_raw if article_links_raw else []
-
-        print(f"Found {len(article_links)} article links.", file=sys.stderr)
-
-        # Cache'e kaydet
+    print(f"Cache MISS: Fetching {search_url} via Scrapling StealthyFetcher", file=sys.stderr)
+    page = None
+    last_err: Optional[str] = None
+    for attempt in range(1, 4):
         try:
-            links_cache[cache_key] = article_links
-            print(f"Stored {len(article_links)} links in cache.", file=sys.stderr)
+            page = await StealthyFetcher.async_fetch(
+                search_url,
+                solve_cloudflare=True,
+                network_idle=True,
+                timeout=120000,
+            )
         except Exception as e:
-            print(f"Warning: Cache SET error: {e}", file=sys.stderr)
+            last_err = f"StealthyFetcher exception: {e}"
+            print(f"Attempt {attempt}/3 raised: {e}", file=sys.stderr)
+            page = None
+            continue
+        if page.status != 200:
+            last_err = f"HTTP {page.status}"
+            print(f"Attempt {attempt}/3 returned {last_err}", file=sys.stderr)
+            continue
+        final_url = getattr(page, "url", "") or ""
+        if "verification" in final_url:
+            last_err = f"final URL still on /verification ({final_url})"
+            print(f"Attempt {attempt}/3 {last_err}", file=sys.stderr)
+            continue
+        break
+    else:
+        raise RuntimeError(f"CAPTCHA bypass failed after 3 attempts: {last_err}")
 
-        # Cookie'leri kaydet
-        try:
-            cdp_cookies = await browser.cookies()
-            if cdp_cookies:
-                cookies = []
-                for c in cdp_cookies:
-                    if 'dergipark' in c.get('domain', ''):
-                        cookies.append({
-                            'name': c.get('name', ''),
-                            'value': c.get('value', ''),
-                            'domain': c.get('domain', ''),
-                            'path': c.get('path', '/'),
-                        })
-                if cookies:
-                    cookie_cache[COOKIES_CACHE_KEY] = cookies
-                    save_cookies_to_disk(cookies)
-                    print(f"Saved {len(cookies)} cookies.", file=sys.stderr)
-        except Exception as e:
-            print(f"Warning: Cookie save error: {e}", file=sys.stderr)
+    article_links: List[Dict[str, str]] = []
+    for card in page.css("div.card.article-card.dp-card-outline"):
+        href = card.css("h5.card-title > a::attr(href)").get()
+        title = card.css("h5.card-title > a::text").get()
+        if not href:
+            continue
+        if href.startswith("/"):
+            href = f"https://dergipark.org.tr{href}"
+        article_links.append({"url": href, "title": (title or "N/A").strip()})
 
-        return article_links
-
-    except Exception as e:
-        print(f"browser-use scraping error: {e}\n{traceback.format_exc()}", file=sys.stderr)
-        raise RuntimeError(f"Scraping failed: {e}")
-    finally:
-        if browser:
-            try:
-                await browser.stop()
-                print("browser-use stopped.", file=sys.stderr)
-            except Exception:
-                pass
-
-
-async def solve_captcha_with_capsolver_browser_use(browser: BrowserUseBrowser, page) -> bool:
-    """CapSolver ile CAPTCHA çözer (browser-use page için)."""
-    print("Solving CAPTCHA with CapSolver...", file=sys.stderr)
-
-    if not CAPSOLVER_API_KEY:
-        print("Error: CAPSOLVER_API_KEY not set.", file=sys.stderr)
-        return False
-
+    print(f"Found {len(article_links)} article links.", file=sys.stderr)
     try:
-        # Sitekey ve URL al
-        page_url = await page.evaluate("() => window.location.href")
-        page_content = await page.evaluate("() => document.documentElement.outerHTML")
-
-        # Turnstile sitekey bul
-        sitekey_match = re.search(r'data-sitekey=["\']([^"\']+)["\']', page_content)
-        if not sitekey_match:
-            print("No sitekey found. HTML snippet (first 2KB):", file=sys.stderr)
-            print(page_content[:2000], file=sys.stderr)
-            print("--- HTML snippet end ---", file=sys.stderr)
-            # Turnstile iframe varsa src'sini de log'la
-            iframe_matches = re.findall(r'<iframe[^>]*src=["\']([^"\']+)["\']', page_content)
-            if iframe_matches:
-                print(f"Iframes found: {iframe_matches}", file=sys.stderr)
-            return False
-
-        site_key = sitekey_match.group(1)
-        print(f"Sitekey: {site_key}", file=sys.stderr)
-
-        # CAPTCHA türünü belirle
-        is_turnstile = 'cf-turnstile' in page_content or 'challenges.cloudflare.com' in page_content
-        task_type = "AntiTurnstileTaskProxyLess" if is_turnstile else "ReCaptchaV2TaskProxyLess"
-        print(f"CAPTCHA type: {'Turnstile' if is_turnstile else 'reCAPTCHA v2'}", file=sys.stderr)
-
-        # CapSolver'a task gönder
-        async with httpx.AsyncClient(timeout=120) as client:
-            create_payload = {
-                "clientKey": CAPSOLVER_API_KEY,
-                "task": {
-                    "type": task_type,
-                    "websiteURL": page_url,
-                    "websiteKey": site_key,
-                }
-            }
-            resp = await client.post(CAPSOLVER_CREATE_TASK_URL, json=create_payload)
-            result = resp.json()
-
-            if result.get("errorId") != 0:
-                print(f"CapSolver create error: {result}", file=sys.stderr)
-                return False
-
-            task_id = result.get("taskId")
-            print(f"CapSolver task created: {task_id}", file=sys.stderr)
-
-            # Sonucu bekle
-            for _ in range(60):
-                await asyncio.sleep(2)
-                get_payload = {"clientKey": CAPSOLVER_API_KEY, "taskId": task_id}
-                resp = await client.post(CAPSOLVER_GET_RESULT_URL, json=get_payload)
-                result = resp.json()
-
-                if result.get("status") == "ready":
-                    token = result.get("solution", {}).get("token")
-                    if token:
-                        print("CapSolver token received.", file=sys.stderr)
-
-                        # Token'ı inject et
-                        if is_turnstile:
-                            await page.evaluate(f"""() => {{
-                                const input = document.querySelector('[name="cf-turnstile-response"]');
-                                if (input) input.value = "{token}";
-                                const hidden = document.querySelector('input[name="cf-turnstile-response"]');
-                                if (hidden) hidden.value = "{token}";
-                            }}""")
-                        else:
-                            await page.evaluate(f"""() => {{
-                                document.querySelector('#g-recaptcha-response').value = "{token}";
-                            }}""")
-
-                        await asyncio.sleep(2)
-
-                        # Submit butonuna tıkla
-                        await page.evaluate("""() => {
-                            const btn = document.querySelector('form[name="search_verification"] button[type="submit"]');
-                            if (btn) {
-                                btn.classList.remove('kt-hidden');
-                                btn.style.display = 'block';
-                                btn.disabled = false;
-                                btn.click();
-                            }
-                        }""")
-
-                        await asyncio.sleep(3)
-
-                        # Başarılı mı?
-                        new_url = await page.evaluate("() => window.location.href")
-                        if "verification" not in new_url:
-                            print("CapSolver CAPTCHA solved!", file=sys.stderr)
-                            return True
-                        else:
-                            print("CapSolver: still on verification page.", file=sys.stderr)
-                            return False
-
-                elif result.get("status") == "failed":
-                    print(f"CapSolver task failed: {result}", file=sys.stderr)
-                    return False
-
-            print("CapSolver timeout.", file=sys.stderr)
-            return False
-
+        links_cache[cache_key] = article_links
     except Exception as e:
-        print(f"CapSolver error: {e}", file=sys.stderr)
-        return False
+        print(f"Warning: links_cache SET error: {e}", file=sys.stderr)
+    return article_links
 
 
 # --- PDF to HTML Conversion ---
@@ -794,7 +464,7 @@ async def search_articles_core(
 ) -> dict:
     """
     Core search function for DergiPark articles.
-    Uses browser-use for scraping.
+    Uses Scrapling's StealthyFetcher to bypass DergiPark's verification page.
 
     Returns a dictionary with pagination info and articles list.
     """
@@ -828,8 +498,7 @@ async def search_articles_core(
         sorted_items = tuple(sorted(cache_key_data.items()))
         links_cache_key = (sorted_items, page)
 
-        # Get Article Links using browser-use
-        full_link_list = await scrape_article_links_browser_use(target_search_url, links_cache_key)
+        full_link_list = await scrape_article_links(target_search_url, links_cache_key)
 
         # Process Results & Pagination
         total_items = len(full_link_list)

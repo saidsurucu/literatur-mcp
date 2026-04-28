@@ -10,7 +10,6 @@ primary_region = 'fra'
 
 [env]
   PORT = '8000'
-  HEADLESS_MODE = 'true'
 
 [http_service]
   internal_port = 8000
@@ -52,4 +51,4 @@ primary_region = 'fra'
   strategy = 'immediate'
 
 [processes]
-  app = 'uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1'
+  app = 'uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1'
