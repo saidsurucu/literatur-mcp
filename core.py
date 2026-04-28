@@ -304,9 +304,7 @@ async def get_article_references_core(article_url: str) -> dict:
 # --- Scrapling-Based Scraping (StealthyFetcher with auto Cloudflare/Turnstile bypass) ---
 
 async def _force_submit_verification(page) -> None:
-    """After Scrapling clicks the Turnstile checkbox, DergiPark's hidden submit button
-    doesn't always auto-fire (especially on Linux/Docker fingerprints). Wait for the
-    cf-turnstile-response token, then click submit ourselves if still on /verification."""
+    """Diagnostic + manual submit fallback for DergiPark's verification page."""
     print("[force_submit] page_action invoked", file=sys.stderr)
     try:
         url = page.url
@@ -315,26 +313,56 @@ async def _force_submit_verification(page) -> None:
             print("[force_submit] not on verification, skipping", file=sys.stderr)
             return
 
-        # Poll up to 30s for Cloudflare to inject the Turnstile response token
+        # Diagnostic dump: every form input on the page (names, types, value lengths)
+        try:
+            inputs_info = await page.evaluate("""() => {
+                return Array.from(document.querySelectorAll('input')).map(i => ({
+                    name: i.name || null,
+                    type: i.type,
+                    id: i.id || null,
+                    valueLen: (i.value || '').length,
+                }));
+            }""")
+            print(f"[force_submit] inputs: {inputs_info}", file=sys.stderr)
+            iframe_info = await page.evaluate("""() => {
+                return Array.from(document.querySelectorAll('iframe')).map(f => ({
+                    src: f.src || null,
+                    id: f.id || null,
+                    name: f.name || null,
+                }));
+            }""")
+            print(f"[force_submit] iframes: {iframe_info}", file=sys.stderr)
+            ts_info = await page.evaluate("""() => {
+                const el = document.querySelector('.cf-turnstile, [data-sitekey], [class*="turnstile"]');
+                if (!el) return null;
+                return {tag: el.tagName, sitekey: el.getAttribute('data-sitekey'), html: el.outerHTML.slice(0, 400)};
+            }""")
+            print(f"[force_submit] turnstile container: {ts_info}", file=sys.stderr)
+        except Exception as e:
+            print(f"[force_submit] diagnostic error: {e}", file=sys.stderr)
+
+        # Poll up to 30s for any token-bearing input to fill in
         token_len = 0
         for i in range(30):
             await page.wait_for_timeout(1000)
             token_len = await page.evaluate("""() => {
-                const el = document.querySelector('[name="cf-turnstile-response"]');
-                return el && el.value ? el.value.length : 0;
+                for (const i of document.querySelectorAll('input[type="hidden"], input[name*="turnstile"], input[name*="captcha"], input[name*="token"]')) {
+                    if (i.value && i.value.length > 10) return i.value.length;
+                }
+                return 0;
             }""")
             if token_len > 10:
-                print(f"[force_submit] token present (len={token_len}) after {i+1}s", file=sys.stderr)
+                print(f"[force_submit] token-shaped value present (len={token_len}) after {i+1}s", file=sys.stderr)
                 break
             if "verification" not in page.url:
                 print("[force_submit] navigated away while waiting for token", file=sys.stderr)
                 return
         else:
-            print(f"[force_submit] timed out waiting for token (last len={token_len})", file=sys.stderr)
+            print(f"[force_submit] no token-shaped value appeared after 30s", file=sys.stderr)
 
-        # Force-show & click the submit button
+        # Submit anyway in case the form accepts an empty token (browsers sometimes do)
         clicked = await page.evaluate("""() => {
-            const form = document.querySelector('form[name="search_verification"]');
+            const form = document.querySelector('form[name="search_verification"]') || document.querySelector('form');
             if (!form) return 'no-form';
             const btn = form.querySelector('button[type="submit"]');
             if (btn) {
